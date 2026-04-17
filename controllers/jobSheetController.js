@@ -321,14 +321,18 @@ exports.getUserReport = async (req, res) => {
 
     let query = {};
 
-    // 🔍 Optional search filter
+    // ✅ SEARCH BY jobSheetNo OR username
     if (jobSheetNo) {
-      query.jobSheetNo = { $regex: jobSheetNo, $options: "i" };
+      query.$or = [
+        { jobSheetNo: { $regex: jobSheetNo, $options: "i" } },
+        { "createdBy.username": { $regex: jobSheetNo, $options: "i" } }
+      ];
     }
 
-    const jobs = await JobSheet.find(query).sort({ createdAt: -1 });
+    const jobs = await JobSheet.find(query)
+      .sort({ createdAt: -1 });
 
-    // ✅ GROUP BY createdBy.username
+    // ✅ GROUP BY USERNAME
     const grouped = {};
 
     jobs.forEach((job) => {
