@@ -87,28 +87,56 @@ router.get("/filter", async (req, res) => {
 /* =====================================================
    NEXT JOB NUMBER  ✅ MUST BE BEFORE /:id
 ===================================================== */
+// router.get("/next-number", async (req, res) => {
+//   try {
+
+//     // Find the HIGHEST plain-number jobSheetNo in DB
+//     const all = await JobSheet.find({
+//       jobSheetNo: { $regex: /^\d+$/ }
+//     }).select("jobSheetNo");
+
+//     if (!all || all.length === 0) {
+//       return res.json({ next: "JS-001" });
+//     }
+
+//     // MAX number, not last inserted
+//     const maxNo = Math.max(...all.map(j => parseInt(j.jobSheetNo)));
+//     return res.json({ next: String(maxNo + 1) });
+
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ message: err.message });
+//   }
+// });
+
+
 router.get("/next-number", async (req, res) => {
   try {
 
-    // Find the HIGHEST plain-number jobSheetNo in DB
-    const all = await JobSheet.find({
-      jobSheetNo: { $regex: /^\d+$/ }
-    }).select("jobSheetNo");
+    const allJobs = await JobSheet.find().select("jobSheetNo");
 
-    if (!all || all.length === 0) {
+    if (!allJobs.length) {
       return res.json({ next: "JS-001" });
     }
 
-    // MAX number, not last inserted
-    const maxNo = Math.max(...all.map(j => parseInt(j.jobSheetNo)));
-    return res.json({ next: String(maxNo + 1) });
+    const numbers = allJobs.map(job => {
+      const num = parseInt(String(job.jobSheetNo).replace(/\D/g, ""));
+      return isNaN(num) ? 0 : num;
+    });
+
+    const maxNumber = Math.max(...numbers);
+    const nextNumber = maxNumber + 1;
+
+    // 🔥 format with leading zeros
+    const formatted = `JS-${String(nextNumber).padStart(3, "0")}`;
+
+    return res.json({ next: formatted });
 
   } catch (err) {
-    console.error(err);
+    console.error("NEXT NUMBER ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 });
-
 /* =====================================================
    CREATE NEW JOBSHEET  ✅ POST — no conflict with /:id
 ===================================================== */
