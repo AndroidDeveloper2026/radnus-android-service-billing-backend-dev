@@ -48,23 +48,26 @@ router.get("/filter", async (req, res) => {
       query["service.dealer"] = { $regex: dealer, $options: "i" };
     }
 
-    if (fromDate || toDate) {
+ if (fromDate || toDate) {
+  query.createdAt = {};
 
-      query.createdAt = {};
+  if (fromDate) {
+    const start = new Date(fromDate);
+    start.setHours(0, 0, 0, 0);
+    query.createdAt.$gte = start;
+  }
 
-      if (fromDate) {
-        const start = new Date(fromDate);
-        start.setHours(0, 0, 0, 0);
-        query.createdAt.$gte = start;
-      }
-
-      if (toDate) {
-        const end = new Date(toDate);
-        end.setHours(23, 59, 59, 999);
-        query.createdAt.$lte = end;
-      }
-
-    }
+  if (toDate) {
+    const end = new Date(toDate);
+    end.setHours(23, 59, 59, 999);
+    query.createdAt.$lte = end;
+  } else {
+    // ✅ If only fromDate is given, limit to end of that same day
+    const end = new Date(fromDate);
+    end.setHours(23, 59, 59, 999);
+    query.createdAt.$lte = end;
+  }
+}
 
     const data = await JobSheet
       .find(query)
