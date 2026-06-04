@@ -25,7 +25,7 @@ exports.createJobSheet = async (req, res) => {
       // ✅ FIX 1 — spareItems create-ல் add பண்ணோம்
       spareItems: JSON.parse(req.body.spareItems || "[]"),
 
-      createdBy: JSON.parse(req.body.createdBy || "{}"),
+      createdBy: req.body.createdBy || "",
     };
 
     const job = new JobSheet(jobData);

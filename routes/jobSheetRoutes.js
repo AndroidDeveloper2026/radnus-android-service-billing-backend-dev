@@ -205,7 +205,7 @@ router.post("/", upload.single("idProofImage"), async (req, res) => {
       accessories:       JSON.parse(req.body.accessories       || "[]"),
       visualIssues:      JSON.parse(req.body.visualIssues      || "[]"),
       spareItems:        JSON.parse(req.body.spareItems         || "[]"),
-      createdBy:         JSON.parse(req.body.createdBy          || "{}"),
+      createdBy: req.body.createdBy || "",
       assignedTo:        engineerName || null,
       idProofImage: req.file ? { url: req.file.path, public_id: req.file.filename } : null,
     });
