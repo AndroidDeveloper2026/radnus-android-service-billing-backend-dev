@@ -80,7 +80,7 @@ const JobSheetSchema = new mongoose.Schema({
 
   createdBy: { username: String, role: String },
 
-  isInvoiced: { type: Boolean, default: false },
+  
   isInvoiced:    { type: Boolean, default: false },
 rebillPending: { type: Boolean, default: false },  // ✅ இதை add பண்ணு
 

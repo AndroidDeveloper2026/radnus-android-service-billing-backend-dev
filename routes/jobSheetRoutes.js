@@ -24,7 +24,7 @@ router.get("/user-report", getUserReport);
 router.get("/workload", async (req, res) => {
   try {
     const activeJobs = await JobSheet.find({
-      "device.mobileStatus": { $nin: ["Delivered", "Delivered NR/NA"] },
+     "device.mobileStatus": { $nin: ["Delivered", "Delivered NR/NA", "Repaired"] },
       isInvoiced: { $ne: true },
     }).select("service.engineer assignedTo");
 
@@ -49,7 +49,7 @@ router.get("/stale", async (req, res) => {
     const days = parseInt(req.query.days || "3");
 
     const jobs = await JobSheet.find({
-      "device.mobileStatus": { $nin: ["Delivered", "Delivered NR/NA"] },
+    "device.mobileStatus": { $nin: ["Delivered", "Delivered NR/NA", "Repaired"] },
       isInvoiced: { $ne: true }
     }).select("jobSheetNo customer device service statusLogs repairSteps createdAt assignedTo");
 
@@ -185,7 +185,7 @@ router.post("/", upload.single("idProofImage"), async (req, res) => {
             ]
           }
         ],
-        "device.mobileStatus": { $nin: ["Delivered", "Delivered NR/NA"] },
+       "device.mobileStatus": { $nin: ["Delivered", "Delivered NR/NA", "Repaired"] },
         isInvoiced: { $ne: true },
       });
       if (activeCount >= MAX_JOBS) {
@@ -275,7 +275,7 @@ router.patch("/:id/transfer", async (req, res) => {
           ]
         }
       ],
-      "device.mobileStatus": { $nin: ["Delivered", "Delivered NR/NA"] },
+   "device.mobileStatus": { $nin: ["Delivered", "Delivered NR/NA", "Repaired"] },
       isInvoiced: { $ne: true },
     });
     if (activeCount >= MAX_JOBS) {
