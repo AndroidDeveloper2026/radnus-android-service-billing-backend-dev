@@ -109,12 +109,32 @@ exports.updateJobSheet = async (req, res) => {
     }
 
     /* 🔒 LOCK CHECK */
-    if (job.isInvoiced) {
-      return res.status(400).json({
-        message: "Cannot edit after invoice generated 🔒"
-      });
-    }
+  /* 🔒 LOCK CHECK — rebillPending=true ஆ இருந்தா allow பண்ணு */
+if (job.isInvoiced && !job.rebillPending) {
+  return res.status(400).json({
+    message: "Cannot edit after invoice generated 🔒"
+  });
+}
+// ✅ REBILL SNAPSHOT — rebillPending=true ஆ இருந்தா மட்டும்
+let rebillSnapshot = null;
+if (job.rebillPending) {
+  const svcData =
+    typeof req.body.service === "string"
+      ? JSON.parse(req.body.service)
+      : req.body.service || {};
 
+  rebillSnapshot = {
+    rebilledAt:    new Date(),
+    rebilledBy:    job.statusLogs?.slice(-1)[0]?.updatedBy || "admin",
+    serviceCharge: Number(svcData.serviceCharge || 0),
+    spareCharge:   Number(svcData.spareCharge   || 0),
+    spareItems:    typeof req.body.spareItems === "string"
+                     ? JSON.parse(req.body.spareItems)
+                     : (req.body.spareItems || []),
+    remarks:       svcData.remarks || "",
+    status:        "Received",
+  };
+}
     const updateData = {
 
       ...req.body,
@@ -161,12 +181,17 @@ exports.updateJobSheet = async (req, res) => {
       updateData.idProofImage = req.file.path;
     }
 
-    const updated = await JobSheet.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true }
-    );
+ // ✅ rebillSnapshot இருந்தா — history save + flag clear
+if (rebillSnapshot) {
+  updateData.rebillPending = false;
+  updateData.$push = { rebillHistory: rebillSnapshot };
+}
 
+const updated = await JobSheet.findByIdAndUpdate(
+  req.params.id,
+  updateData,
+  { new: true }
+);
     res.json({
       message: "Job Sheet Updated ✅",
       job: updated

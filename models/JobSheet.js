@@ -7,69 +7,83 @@ const SpareItemSchema = new mongoose.Schema({
   amount: Number
 });
 
+const StatusLogSchema = new mongoose.Schema({
+  status:    String,
+  updatedBy: String,
+  timestamp: { type: Date, default: Date.now }
+});
+
+const RepairStepSchema = new mongoose.Schema({
+  step:        String,
+  note:        String,
+  done:        { type: Boolean, default: false },
+  completedBy: String,
+  completedAt: Date,
+});
+
+const TransferLogSchema = new mongoose.Schema({
+  from:          String,
+  to:            String,
+  note:          String,
+  transferredAt: { type: Date, default: Date.now }
+});
+
+// ✅ NEW — Rebill history snapshot
+const RebillHistorySchema = new mongoose.Schema({
+  rebilledAt:    { type: Date,   default: Date.now },
+  rebilledBy:    { type: String, default: "admin"  },
+  serviceCharge: { type: Number, default: 0 },
+  spareCharge:   { type: Number, default: 0 },
+  spareItems:    { type: Array,  default: [] },
+  remarks:       { type: String, default: "" },
+  status:        { type: String, default: "" },
+  rebillPending: { type: Boolean, default: false }
+});
+
 const JobSheetSchema = new mongoose.Schema({
-  jobSheetNo: {
-    type: String,
-    unique: true
-  },
+  jobSheetNo: { type: String, unique: true },
 
   customer: {
-    name: String,
-    contact: String,
-    altContact: String,
-    address: String,
-    email: String,
+    name: String, contact: String, altContact: String,
+    address: String, email: String,
   },
 
   device: {
-    make: String,
-    model: String,
-    imei: String,
-    warranty: String,
-    pattern: String,
-    mobileStatus: String,
+    make: String, model: String, imei: String,
+    warranty: String, pattern: String, mobileStatus: String,
   },
 
   physicalCondition: [String],
-  accessories: [String],
-  visualIssues: [String],
+  accessories:       [String],
+  visualIssues:      [String],
 
-  idProofType: String,
-  idProofImage: {
-    url: String,
-    public_id: String
-  },
+  idProofType:  String,
+  idProofImage: { url: String, public_id: String },
 
   service: {
-    engineer: String,
-    dealer: String,
-    drawer: String,
-    serviceCharge: Number,
-    spareCharge: Number,
-    estimate: String,
-    paymentMode: String,
-    repairDate: Date,
-    deliveryDate: Date,
-    remarks: String,
+    engineer: String, dealer: String, drawer: String,
+    serviceCharge: Number, spareCharge: Number,
+    estimate: String, paymentMode: String,
+    repairDate: Date, deliveryDate: Date, remarks: String,
   },
 
   spareItems: [SpareItemSchema],
 
+  statusLogs:  [StatusLogSchema],
+  repairSteps: [RepairStepSchema],
 
-  // status: {
-  //   type: String,
-  //   default: "Pending",
-  // },
+  assignedTo:  { type: String, default: null },
+  transferLog: [TransferLogSchema],
 
-  createdBy: {
-    username: String,
-    role: String
-  },
+  // ✅ NEW — stores each previous invoice before rebill
+  rebillHistory: [RebillHistorySchema],
 
-  isInvoiced: {
-    type: Boolean,
-    default: false
-  }
+  createdBy: { username: String, role: String },
+
+  isInvoiced: { type: Boolean, default: false },
+  isInvoiced:    { type: Boolean, default: false },
+rebillPending: { type: Boolean, default: false },  // ✅ இதை add பண்ணு
+
 }, { timestamps: true });
 
 module.exports = mongoose.model("JobSheet", JobSheetSchema);
