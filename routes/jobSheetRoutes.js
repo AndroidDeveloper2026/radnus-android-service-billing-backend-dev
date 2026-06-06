@@ -272,30 +272,36 @@ router.patch("/:id/transfer", async (req, res) => {
     const { from, to, note } = req.body;
     if (!to) return res.status(400).json({ message: "Transfer target required" });
 
-    const activeCount = await JobSheet.countDocuments({
-      _id: { $ne: req.params.id },
-      $or: [
-        { assignedTo: to },
-        {
-          $and: [
-            { $or: [{ assignedTo: null }, { assignedTo: "" }, { assignedTo: { $exists: false } }] },
-            { "service.engineer": to }
-          ]
-        }
-      ],
-   "device.mobileStatus": { $nin: ["Delivered", "Delivered NR/NA", "Repaired"] },
-      isInvoiced: { $ne: true },
-    });
-    if (activeCount >= MAX_JOBS) {
-      return res.status(400).json({
-        message: `${to} is at full capacity (${MAX_JOBS} jobs). Cannot transfer.`,
-        code: "ENGINEER_FULL",
+    // ✅ Reception-ஆனா workload check வேண்டாம்
+    if (to !== "Reception") {
+      const activeCount = await JobSheet.countDocuments({
+        _id: { $ne: req.params.id },
+        $or: [
+          { assignedTo: to },
+          {
+            $and: [
+              { $or: [{ assignedTo: null }, { assignedTo: "" }, { assignedTo: { $exists: false } }] },
+              { "service.engineer": to }
+            ]
+          }
+        ],
+        "device.mobileStatus": { $nin: ["Delivered", "Delivered NR/NA", "Repaired"] },
+        isInvoiced: { $ne: true },
       });
+      if (activeCount >= MAX_JOBS) {
+        return res.status(400).json({
+          message: `${to} is at full capacity (${MAX_JOBS} jobs). Cannot transfer.`,
+          code: "ENGINEER_FULL",
+        });
+      }
     }
 
     const job = await JobSheet.findByIdAndUpdate(
       req.params.id,
-      { $set: { assignedTo: to }, $push: { transferLog: { from, to, note: note || "", transferredAt: new Date() } } },
+      {
+        $set: { assignedTo: to },
+        $push: { transferLog: { from, to, note: note || "", transferredAt: new Date() } }
+      },
       { new: true }
     );
     if (!job) return res.status(404).json({ message: "Job not found" });
@@ -415,10 +421,13 @@ router.put("/:id/spares", async (req, res) => {
 
 
 
+
+
+// ✅ இது கீழே இருக்கணும்
 router.get("/:id", getJobSheetById);
 router.put("/:id", upload.single("idProofImage"), updateJobSheet);
-// POST-ஐ GET ஆ மாத்துங்க
-
-
 
 module.exports = router;
+
+
+
