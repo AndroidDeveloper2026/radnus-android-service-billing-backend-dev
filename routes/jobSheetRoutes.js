@@ -205,7 +205,11 @@ router.post("/", upload.single("idProofImage"), async (req, res) => {
       accessories:       JSON.parse(req.body.accessories       || "[]"),
       visualIssues:      JSON.parse(req.body.visualIssues      || "[]"),
       spareItems:        JSON.parse(req.body.spareItems         || "[]"),
-      createdBy: req.body.createdBy || "",
+    createdBy: (() => {
+  try { return JSON.parse(req.body.createdBy || "{}"); }
+  catch { return { username: req.body.createdBy || "", role: "" }; }
+})(),
+
       assignedTo:        engineerName || null,
       idProofImage: req.file ? { url: req.file.path, public_id: req.file.filename } : null,
     });
@@ -256,7 +260,11 @@ router.put("/:id/rebill", async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
-/* =====================================================
+
+
+
+/* ===============
+======================================
    TRANSFER — with workload check
 ===================================================== */
 router.patch("/:id/transfer", async (req, res) => {
@@ -403,7 +411,14 @@ router.put("/:id/spares", async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+
+
+
+
 router.get("/:id", getJobSheetById);
 router.put("/:id", upload.single("idProofImage"), updateJobSheet);
+// POST-ஐ GET ஆ மாத்துங்க
+
+
 
 module.exports = router;

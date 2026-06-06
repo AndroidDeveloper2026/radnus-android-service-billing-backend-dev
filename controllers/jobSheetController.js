@@ -25,7 +25,11 @@ exports.createJobSheet = async (req, res) => {
       // ✅ FIX 1 — spareItems create-ல் add பண்ணோம்
       spareItems: JSON.parse(req.body.spareItems || "[]"),
 
-      createdBy: req.body.createdBy || "",
+     createdBy: (() => {
+  try { return JSON.parse(req.body.createdBy || "{}"); }
+  catch { return { username: req.body.createdBy || "", role: "" }; }
+})(),
+
     };
 
     const job = new JobSheet(jobData);
@@ -373,7 +377,11 @@ exports.getUserReport = async (req, res) => {
     const grouped = {};
 
     jobs.forEach((job) => {
-      const username = job.createdBy?.username || "Unknown";
+     const createdBy = job.createdBy;
+const username = typeof createdBy === "object"
+  ? (createdBy?.username || "Unknown")
+  : (createdBy || "Unknown");
+
 
       if (!grouped[username]) {
         grouped[username] = [];
