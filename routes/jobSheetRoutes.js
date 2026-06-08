@@ -417,11 +417,54 @@ router.put("/:id/spares", async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+/* =====================================================
+   CUSTOMER AUTOCOMPLETE API (FIXED - Show All Names Separately)
+===================================================== */
+router.get("/customers/search", async (req, res) => {
+  try {
+    const { q, type } = req.query;
+    if (!q || q.trim().length < 1) return res.json([]);
 
+    const searchRegex = new RegExp("^" + q.trim(), "i");
 
+    let matchQuery = {};
+    if (type === "contact") {
+      matchQuery = { "customer.contact": searchRegex };
+    } else {
+      matchQuery = { "customer.name": searchRegex };
+    }
 
+    // Get all matching jobs with unique name+contact combinations
+    const customers = await JobSheet.aggregate([
+      { $match: matchQuery },
+      { $sort: { createdAt: -1 } },
+      
+      // Group by name + contact (unique combination)
+      {
+        $group: {
+          _id: {
+            name: "$customer.name",
+            contact: "$customer.contact"
+          },
+          name: { $first: "$customer.name" },
+          contact: { $first: "$customer.contact" },
+          altContact: { $first: "$customer.altContact" },
+          address: { $first: "$customer.address" },
+          email: { $first: "$customer.email" },
+          lastJobDate: { $first: "$createdAt" }
+        }
+      },
+      
+      { $sort: { name: 1 } },
+      { $limit: 15 }
+    ]);
 
-
+    res.json(customers);
+  } catch (err) {
+    console.error("CUSTOMER SEARCH ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
 
 // ✅ இது கீழே இருக்கணும்
 router.get("/:id", getJobSheetById);
