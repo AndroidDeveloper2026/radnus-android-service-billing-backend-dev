@@ -261,8 +261,6 @@ router.put("/:id/rebill", async (req, res) => {
   }
 });
 
-
-
 /* ===============
 ======================================
    TRANSFER — with workload check
@@ -392,13 +390,27 @@ router.post("/send-estimate/:id", sendEstimateEmail);
 ===================================================== */
 router.put("/:id/invoice", async (req, res) => {
   try {
-    const job = await JobSheet.findByIdAndUpdate(
+    const job = await JobSheet.findById(req.params.id);
+    if (!job) return res.status(404).json({ message: "Job not found" });
+
+    // ✅ Already "Delivered NR/NA" இருந்தா அதையே வை, இல்லன்னா "Delivered" set பண்ணு
+    const currentStatus = job.device?.mobileStatus;
+    const finalStatus =
+      currentStatus === "Delivered NR/NA" ? "Delivered NR/NA" : "Delivered";
+
+    const updated = await JobSheet.findByIdAndUpdate(
       req.params.id,
-      { isInvoiced: true, "device.mobileStatus": "Delivered" },
+      {
+        isInvoiced: true,
+        "device.mobileStatus": finalStatus,
+      },
       { new: true }
     );
-    res.json(job);
-  } catch (err) { res.status(500).json({ message: "Error locking invoice" }); }
+
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ message: "Error locking invoice" });
+  }
 });
 
 /* =====================================================
@@ -465,12 +477,54 @@ router.get("/customers/search", async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+/* =====================================================
+   CANCEL JOBSHEET
+===================================================== */
+router.put("/:id/cancel", async (req, res) => {
+  try {
+    const { cancelRemarks, cancelledBy } = req.body;
 
+    if (!cancelRemarks || !cancelRemarks.trim()) {
+      return res.status(400).json({ message: "Cancel remarks is required" });
+    }
+
+    const job = await JobSheet.findById(req.params.id);
+    if (!job) return res.status(404).json({ message: "Job not found" });
+
+    if (job.isCancelled) {
+      return res.status(400).json({ message: "Job is already cancelled" });
+    }
+
+    const updated = await JobSheet.findByIdAndUpdate(
+      req.params.id,
+      {
+        isCancelled:            true,
+        cancelRemarks:          cancelRemarks.trim(),
+        cancelledBy:            cancelledBy || "admin",
+        cancelledAt:            new Date(),
+        "device.mobileStatus":  "Cancelled",
+        $push: {
+          statusLogs: {
+            status:    "Cancelled",
+            updatedBy: cancelledBy || "admin",
+            timestamp: new Date(),
+            note:      cancelRemarks.trim(),
+          },
+        },
+      },
+      { new: true }
+    );
+
+    res.json(updated);
+  } catch (err) {
+    console.error("CANCEL ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
 // ✅ இது கீழே இருக்கணும்
 router.get("/:id", getJobSheetById);
 router.put("/:id", upload.single("idProofImage"), updateJobSheet);
 
 module.exports = router;
-
 
 

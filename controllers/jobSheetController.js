@@ -358,40 +358,45 @@ Thank you for choosing Radnus Communication.
 /* ================= USER REPORT ================= */
 exports.getUserReport = async (req, res) => {
   try {
-    const { jobSheetNo } = req.query;
+    const { jobSheetNo, fromDate, toDate } = req.query;
 
-    let query = {};
+    const query = {};
 
-    // ✅ SEARCH BY jobSheetNo OR username
-    if (jobSheetNo) {
+    if (jobSheetNo && jobSheetNo.trim()) {
+      const q = jobSheetNo.trim();
       query.$or = [
-        { jobSheetNo: { $regex: jobSheetNo, $options: "i" } },
-        { "createdBy.username": { $regex: jobSheetNo, $options: "i" } }
+        { "createdBy.username": { $regex: q, $options: "i" } },
+        { jobSheetNo:           { $regex: q, $options: "i" } },
       ];
     }
 
-    const jobs = await JobSheet.find(query)
-      .sort({ createdAt: -1 });
-
-    // ✅ GROUP BY USERNAME
-    const grouped = {};
-
-    jobs.forEach((job) => {
-     const createdBy = job.createdBy;
-const username = typeof createdBy === "object"
-  ? (createdBy?.username || "Unknown")
-  : (createdBy || "Unknown");
-
-
-      if (!grouped[username]) {
-        grouped[username] = [];
+    if (fromDate || toDate) {
+      query.createdAt = {};
+      if (fromDate) {
+        const start = new Date(fromDate);
+        start.setHours(0, 0, 0, 0);
+        query.createdAt.$gte = start;
       }
+      if (toDate) {
+        const end = new Date(toDate);
+        end.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = end;
+      }
+    }
 
+    const jobs = await JobSheet.find(query).sort({ createdAt: -1 });
+
+    const grouped = {};
+    for (const job of jobs) {
+      const createdBy = job.createdBy;
+      const username = typeof createdBy === "object"
+        ? (createdBy?.username || "Unknown")
+        : (createdBy || "Unknown");
+      if (!grouped[username]) grouped[username] = [];
       grouped[username].push(job);
-    });
+    }
 
     res.json(grouped);
-
   } catch (err) {
     console.error("USER REPORT ERROR:", err);
     res.status(500).json({ message: err.message });

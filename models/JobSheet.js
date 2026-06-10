@@ -59,14 +59,14 @@ const JobSheetSchema = new mongoose.Schema({
 
   idProofType:  String,
   idProofImage: { url: String, public_id: String },
-
-  service: {
+service: {
     engineer: String, dealer: String, drawer: String,
     serviceCharge: Number, spareCharge: Number,
     estimate: String, paymentMode: String,
     repairDate: Date, deliveryDate: Date, remarks: String,
+    advanceAmount: { type: Number, default: 0 },
+    margin:        { type: Number, default: 0 },
   },
-
   spareItems: [SpareItemSchema],
 
   statusLogs:  [StatusLogSchema],
@@ -79,7 +79,10 @@ const JobSheetSchema = new mongoose.Schema({
   rebillHistory: [RebillHistorySchema],
 
   createdBy: { username: String, role: String },
-
+isCancelled:   { type: Boolean, default: false },
+cancelRemarks: { type: String,  default: "" },
+cancelledBy:   { type: String,  default: "" },
+cancelledAt:   { type: Date },
   
   isInvoiced:    { type: Boolean, default: false },
 rebillPending: { type: Boolean, default: false },  // ✅ இதை add பண்ணு
