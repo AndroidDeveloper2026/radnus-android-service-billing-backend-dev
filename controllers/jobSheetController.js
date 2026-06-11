@@ -114,11 +114,11 @@ exports.updateJobSheet = async (req, res) => {
 
     /* 🔒 LOCK CHECK */
   /* 🔒 LOCK CHECK — rebillPending=true ஆ இருந்தா allow பண்ணு */
-if (job.isInvoiced && !job.rebillPending) {
-  return res.status(400).json({
-    message: "Cannot edit after invoice generated 🔒"
-  });
-}
+// if (job.isInvoiced && !job.rebillPending) {
+//   return res.status(400).json({
+//     message: "Cannot edit after invoice generated 🔒"
+//   });
+// }
 // ✅ REBILL SNAPSHOT — rebillPending=true ஆ இருந்தா மட்டும்
 let rebillSnapshot = null;
 if (job.rebillPending) {

@@ -382,7 +382,45 @@ router.post("/send-invoice/:id", async (req, res) => {
     res.json({ message: "Invoice sent successfully ✅" });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
+router.get("/salesrep-report", async (req, res) => {
+  try {
+    const { salesRep, fromDate, toDate } = req.query;
+    const query = {};
 
+    if (salesRep) {
+      query["service.serviceRep"] = { $regex: salesRep.trim(), $options: "i" };
+    }
+
+    if (fromDate || toDate) {
+      query.createdAt = {};
+      if (fromDate) {
+        const start = new Date(fromDate);
+        start.setHours(0, 0, 0, 0);
+        query.createdAt.$gte = start;
+      }
+      if (toDate) {
+        const end = new Date(toDate);
+        end.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = end;
+      }
+    }
+
+    const jobs = await JobSheet.find(query).sort({ createdAt: -1 });
+
+    // Group by serviceRep
+    const grouped = {};
+    for (const job of jobs) {
+      const rep = job.service?.serviceRep?.trim() || "Unassigned";
+      if (!grouped[rep]) grouped[rep] = [];
+      grouped[rep].push(job);
+    }
+
+    res.json(grouped);
+  } catch (err) {
+    console.error("SALESREP REPORT ERROR:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
 router.post("/send-estimate/:id", sendEstimateEmail);
 
 /* =====================================================

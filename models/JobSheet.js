@@ -63,9 +63,11 @@ service: {
     engineer: String, dealer: String, drawer: String,
     serviceCharge: Number, spareCharge: Number,
     estimate: String, paymentMode: String,
-    repairDate: Date, deliveryDate: Date, remarks: String,
+    repairDate: Date, deliveryDate: Date, 
+    remarks: String,
     advanceAmount: { type: Number, default: 0 },
     margin:        { type: Number, default: 0 },
+    serviceRep:    { type: String, default: "" },   // ✅ NEW
   },
   spareItems: [SpareItemSchema],
 
