@@ -205,11 +205,10 @@ router.post("/", upload.single("idProofImage"), async (req, res) => {
       accessories:       JSON.parse(req.body.accessories       || "[]"),
       visualIssues:      JSON.parse(req.body.visualIssues      || "[]"),
       spareItems:        JSON.parse(req.body.spareItems         || "[]"),
-    createdBy: (() => {
-  try { return JSON.parse(req.body.createdBy || "{}"); }
-  catch { return { username: req.body.createdBy || "", role: "" }; }
-})(),
-
+      createdBy: (() => {
+        try { return JSON.parse(req.body.createdBy || "{}"); }
+        catch { return { username: req.body.createdBy || "", role: "" }; }
+      })(),
       assignedTo:        engineerName || null,
       idProofImage: req.file ? { url: req.file.path, public_id: req.file.filename } : null,
     });
@@ -222,11 +221,7 @@ router.post("/", upload.single("idProofImage"), async (req, res) => {
 });
 
 /* =====================================================
-   ✅ REBILL — Reopen an invoiced job for re-repair
-   - isInvoiced = false (unlock)
-   - Save old invoice details to rebillHistory
-   - Reset charges, status back to Received
-   - Keep all customer/device info intact
+   REBILL — Reopen an invoiced job for re-repair
 ===================================================== */
 router.put("/:id/rebill", async (req, res) => {
   try {
@@ -237,7 +232,7 @@ router.put("/:id/rebill", async (req, res) => {
 
     await JobSheet.findByIdAndUpdate(req.params.id, {
       isInvoiced: false,
-      rebillPending: true,           // ✅ flag — snapshot இன்னும் save ஆகல
+      rebillPending: true,
       "device.mobileStatus": "Received",
       "service.serviceCharge": 0,
       "service.spareCharge": 0,
@@ -261,8 +256,7 @@ router.put("/:id/rebill", async (req, res) => {
   }
 });
 
-/* ===============
-======================================
+/* =====================================================
    TRANSFER — with workload check
 ===================================================== */
 router.patch("/:id/transfer", async (req, res) => {
@@ -270,7 +264,6 @@ router.patch("/:id/transfer", async (req, res) => {
     const { from, to, note } = req.body;
     if (!to) return res.status(400).json({ message: "Transfer target required" });
 
-    // ✅ Reception-ஆனா workload check வேண்டாம்
     if (to !== "Reception") {
       const activeCount = await JobSheet.countDocuments({
         _id: { $ne: req.params.id },
@@ -382,6 +375,10 @@ router.post("/send-invoice/:id", async (req, res) => {
     res.json({ message: "Invoice sent successfully ✅" });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
+
+/* =====================================================
+   SALESREP REPORT
+===================================================== */
 router.get("/salesrep-report", async (req, res) => {
   try {
     const { salesRep, fromDate, toDate } = req.query;
@@ -407,7 +404,6 @@ router.get("/salesrep-report", async (req, res) => {
 
     const jobs = await JobSheet.find(query).sort({ createdAt: -1 });
 
-    // Group by serviceRep
     const grouped = {};
     for (const job of jobs) {
       const rep = job.service?.serviceRep?.trim() || "Unassigned";
@@ -421,6 +417,7 @@ router.get("/salesrep-report", async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+
 router.post("/send-estimate/:id", sendEstimateEmail);
 
 /* =====================================================
@@ -431,7 +428,6 @@ router.put("/:id/invoice", async (req, res) => {
     const job = await JobSheet.findById(req.params.id);
     if (!job) return res.status(404).json({ message: "Job not found" });
 
-    // ✅ Already "Delivered NR/NA" இருந்தா அதையே வை, இல்லன்னா "Delivered" set பண்ணு
     const currentStatus = job.device?.mobileStatus;
     const finalStatus =
       currentStatus === "Delivered NR/NA" ? "Delivered NR/NA" : "Delivered";
@@ -468,7 +464,8 @@ router.put("/:id/spares", async (req, res) => {
 });
 
 /* =====================================================
-   CUSTOMER AUTOCOMPLETE API (FIXED - Show All Names Separately)
+   CUSTOMER AUTOCOMPLETE
+   ✅ FIX: Yes or Already Done இருந்தா → "Already Done" prefill
 ===================================================== */
 router.get("/customers/search", async (req, res) => {
   try {
@@ -484,27 +481,55 @@ router.get("/customers/search", async (req, res) => {
       matchQuery = { "customer.name": searchRegex };
     }
 
-    // Get all matching jobs with unique name+contact combinations
     const customers = await JobSheet.aggregate([
       { $match: matchQuery },
       { $sort: { createdAt: -1 } },
-      
-      // Group by name + contact (unique combination)
+
+      // ✅ Group by name + contact — insta/google values array-ஆ collect பண்ணு
       {
         $group: {
           _id: {
             name: "$customer.name",
             contact: "$customer.contact"
           },
-          name: { $first: "$customer.name" },
-          contact: { $first: "$customer.contact" },
-          altContact: { $first: "$customer.altContact" },
-          address: { $first: "$customer.address" },
-          email: { $first: "$customer.email" },
+          name:        { $first: "$customer.name" },
+          contact:     { $first: "$customer.contact" },
+          altContact:  { $first: "$customer.altContact" },
+          address:     { $first: "$customer.address" },
+          email:       { $first: "$customer.email" },
+          // ✅ CHANGED: $first → $push (all past values collect பண்ணு)
+          instaValues: { $push: "$service.instaFollowers" },
+          googleValues: { $push: "$service.googleReview" },
           lastJobDate: { $first: "$createdAt" }
         }
       },
-      
+
+      // ✅ NEW: Yes or Already Done = "Already Done" return, மத்தது = ""
+      {
+        $addFields: {
+          instaFollowers: {
+            $cond: [
+              { $or: [
+                { $in: ["Already Done", "$instaValues"] },
+                { $in: ["Yes", "$instaValues"] }
+              ]},
+              "Already Done",
+              ""
+            ]
+          },
+          googleReview: {
+            $cond: [
+              { $or: [
+                { $in: ["Already Done", "$googleValues"] },
+                { $in: ["Yes", "$googleValues"] }
+              ]},
+              "Already Done",
+              ""
+            ]
+          }
+        }
+      },
+
       { $sort: { name: 1 } },
       { $limit: 15 }
     ]);
@@ -515,6 +540,7 @@ router.get("/customers/search", async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+
 /* =====================================================
    CANCEL JOBSHEET
 ===================================================== */
@@ -559,10 +585,19 @@ router.put("/:id/cancel", async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
-// ✅ இது கீழே இருக்கணும்
+
+// ✅ இது எப்பவும் கீழே இருக்கணும் (dynamic :id routes last)
 router.get("/:id", getJobSheetById);
-router.put("/:id", upload.single("idProofImage"), updateJobSheet);
+
+router.put("/:id", upload.single("idProofImage"), async (req, res, next) => {
+  // ✅ DEBUG
+  console.log("=== PUT ROUTE HIT ===");
+  console.log("ID:", req.params.id);
+  const svc = typeof req.body.service === "string" 
+    ? JSON.parse(req.body.service) 
+    : req.body.service;
+  console.log("advanceDate from route:", svc?.advanceDate);
+  next(); // controller-க்கு pass பண்ணு
+}, updateJobSheet);
 
 module.exports = router;
-
-

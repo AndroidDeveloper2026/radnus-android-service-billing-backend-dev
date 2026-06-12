@@ -66,8 +66,12 @@ service: {
     repairDate: Date, deliveryDate: Date, 
     remarks: String,
     advanceAmount: { type: Number, default: 0 },
+     advanceDate: Date, 
     margin:        { type: Number, default: 0 },
     serviceRep:    { type: String, default: "" },   // ✅ NEW
+
+instaFollowers: { type: String, default: "" },   
+googleReview:   { type: String, default: "" },   
   },
   spareItems: [SpareItemSchema],
 

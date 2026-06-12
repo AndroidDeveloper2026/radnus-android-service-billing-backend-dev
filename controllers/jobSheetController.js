@@ -101,116 +101,91 @@ exports.getJobSheetById = async (req, res) => {
 
 /* ================= UPDATE ================= */
 exports.updateJobSheet = async (req, res) => {
-
   try {
-
     const job = await JobSheet.findById(req.params.id);
+    if (!job) return res.status(404).json({ message: "Job not found" });
 
-    if (!job) {
-      return res.status(404).json({
-        message: "Job not found"
-      });
+    // ✅ Parse all JSON fields
+    const serviceData        = typeof req.body.service === "string"          ? JSON.parse(req.body.service)          : (req.body.service          || {});
+    
+    const customerData       = typeof req.body.customer === "string"         ? JSON.parse(req.body.customer)         : (req.body.customer         || {});
+    const deviceData         = typeof req.body.device === "string"           ? JSON.parse(req.body.device)           : (req.body.device           || {});
+    const physicalCondition  = typeof req.body.physicalCondition === "string"? JSON.parse(req.body.physicalCondition): (req.body.physicalCondition || []);
+    const accessories        = typeof req.body.accessories === "string"      ? JSON.parse(req.body.accessories)      : (req.body.accessories       || []);
+    const visualIssues       = typeof req.body.visualIssues === "string"     ? JSON.parse(req.body.visualIssues)     : (req.body.visualIssues      || []);
+    const spareItems         = typeof req.body.spareItems === "string"       ? JSON.parse(req.body.spareItems)       : (req.body.spareItems        || []);
+
+    // ✅ Rebill snapshot
+    let rebillSnapshot = null;
+    if (job.rebillPending) {
+      rebillSnapshot = {
+        rebilledAt:    new Date(),
+        rebilledBy:    job.statusLogs?.slice(-1)[0]?.updatedBy || "admin",
+        serviceCharge: Number(serviceData.serviceCharge || 0),
+        spareCharge:   Number(serviceData.spareCharge   || 0),
+        spareItems,
+        remarks:       serviceData.remarks || "",
+        status:        "Received",
+      };
     }
 
-    /* 🔒 LOCK CHECK */
-  /* 🔒 LOCK CHECK — rebillPending=true ஆ இருந்தா allow பண்ணு */
-// if (job.isInvoiced && !job.rebillPending) {
-//   return res.status(400).json({
-//     message: "Cannot edit after invoice generated 🔒"
-//   });
-// }
-// ✅ REBILL SNAPSHOT — rebillPending=true ஆ இருந்தா மட்டும்
-let rebillSnapshot = null;
-if (job.rebillPending) {
-  const svcData =
-    typeof req.body.service === "string"
-      ? JSON.parse(req.body.service)
-      : req.body.service || {};
-
-  rebillSnapshot = {
-    rebilledAt:    new Date(),
-    rebilledBy:    job.statusLogs?.slice(-1)[0]?.updatedBy || "admin",
-    serviceCharge: Number(svcData.serviceCharge || 0),
-    spareCharge:   Number(svcData.spareCharge   || 0),
-    spareItems:    typeof req.body.spareItems === "string"
-                     ? JSON.parse(req.body.spareItems)
-                     : (req.body.spareItems || []),
-    remarks:       svcData.remarks || "",
-    status:        "Received",
-  };
-}
+    // ✅ Build update — service object EXPLICIT-ஆ (எந்த field-உம் miss ஆகாது)
     const updateData = {
+      jobSheetNo:        req.body.jobSheetNo,
+      customer:          customerData,
+      device:            { ...deviceData, idProofType: req.body.idProofType },
+      physicalCondition,
+      accessories,
+      visualIssues,
+      spareItems,
 
-      ...req.body,
-
-      customer:
-        typeof req.body.customer === "string"
-          ? JSON.parse(req.body.customer)
-          : req.body.customer,
-
-      device:
-        typeof req.body.device === "string"
-          ? JSON.parse(req.body.device)
-          : req.body.device,
-
-      service:
-        typeof req.body.service === "string"
-          ? JSON.parse(req.body.service)
-          : req.body.service,
-
-      physicalCondition:
-        typeof req.body.physicalCondition === "string"
-          ? JSON.parse(req.body.physicalCondition)
-          : req.body.physicalCondition,
-
-      accessories:
-        typeof req.body.accessories === "string"
-          ? JSON.parse(req.body.accessories)
-          : req.body.accessories,
-
-      visualIssues:
-        typeof req.body.visualIssues === "string"
-          ? JSON.parse(req.body.visualIssues)
-          : req.body.visualIssues,
-
-      // ✅ FIX 2 — spareItems update-ல் parse பண்ணோம்
-      spareItems:
-        typeof req.body.spareItems === "string"
-          ? JSON.parse(req.body.spareItems)
-          : (req.body.spareItems || []),
-
+      // ✅ KEY FIX: service முழுசா explicit build
+      service: {
+        engineer:       serviceData.engineer       || "",
+        dealer:         serviceData.dealer         || "",
+        drawer:         serviceData.drawer         || "",
+        serviceRep:     serviceData.serviceRep     || "",
+        serviceCharge:  Number(serviceData.serviceCharge  || 0),
+        spareCharge:    Number(serviceData.spareCharge    || 0),
+        estimate:       serviceData.estimate       || "",
+        paymentMode:    serviceData.paymentMode    || "",
+        repairDate:     serviceData.repairDate     || null,
+        deliveryDate:   serviceData.deliveryDate   || null,
+        advanceAmount:  Number(serviceData.advanceAmount  || 0),
+        advanceDate:    serviceData.advanceDate    || null,  // ✅ இதுதான் fix
+        margin:         Number(serviceData.margin  || 0),
+        instaFollowers: serviceData.instaFollowers || "",
+        googleReview:   serviceData.googleReview   || "",
+        remarks:        serviceData.remarks        || "",
+      },
     };
 
     if (req.file) {
-      updateData.idProofImage = req.file.path;
+      updateData.idProofImage = { url: req.file.path, public_id: req.file.filename };
     }
 
- // ✅ rebillSnapshot இருந்தா — history save + flag clear
-if (rebillSnapshot) {
-  updateData.rebillPending = false;
-  updateData.$push = { rebillHistory: rebillSnapshot };
-}
+    if (rebillSnapshot) {
+      updateData.rebillPending = false;
+      updateData.$push = { rebillHistory: rebillSnapshot };
+    }
 
-const updated = await JobSheet.findByIdAndUpdate(
-  req.params.id,
-  updateData,
-  { new: true }
-);
-    res.json({
-      message: "Job Sheet Updated ✅",
-      job: updated
-    });
+   await JobSheet.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true }
+    );
+
+    // ✅ Fresh fetch — DB-லிருந்து latest data எடு
+    const freshJob = await JobSheet.findById(req.params.id);
+
+
+
+    res.json({ message: "Job Sheet Updated ✅", job: freshJob });
 
   } catch (err) {
-
     console.error("UPDATE ERROR:", err);
-
-    res.status(400).json({
-      error: err.message
-    });
-
+    res.status(400).json({ error: err.message });
   }
-
 };
 
 
