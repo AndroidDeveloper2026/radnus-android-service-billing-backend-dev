@@ -142,6 +142,7 @@ exports.updateJobSheet = async (req, res) => {
       // ✅ KEY FIX: service முழுசா explicit build
       service: {
         engineer:       serviceData.engineer       || "",
+          softwareEngineer:  serviceData.softwareEngineer  || "", // ADD THIS
         dealer:         serviceData.dealer         || "",
         drawer:         serviceData.drawer         || "",
         serviceRep:     serviceData.serviceRep     || "",

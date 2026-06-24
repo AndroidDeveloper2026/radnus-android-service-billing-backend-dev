@@ -16,6 +16,18 @@ const {
 
 const MAX_JOBS = 5;
 
+/* =====================================================
+   WORKLOAD HELPER — simple 1 job = 1 point
+===================================================== */
+const getEngineerLoad = async (name) => {
+  const count = await JobSheet.countDocuments({
+    "service.engineer": name,
+    "device.mobileStatus": { $nin: ["Delivered", "Delivered NR/NA", "Repaired"] },
+    isInvoiced: { $ne: true },
+  });
+  return count;
+};
+
 router.get("/user-report", getUserReport);
 
 /* =====================================================
@@ -24,19 +36,18 @@ router.get("/user-report", getUserReport);
 router.get("/workload", async (req, res) => {
   try {
     const activeJobs = await JobSheet.find({
-     "device.mobileStatus": { $nin: ["Delivered", "Delivered NR/NA", "Repaired"] },
+      "device.mobileStatus": { $nin: ["Delivered", "Delivered NR/NA", "Repaired"] },
       isInvoiced: { $ne: true },
-    }).select("service.engineer assignedTo");
+    }).select("service.engineer");
 
     const countMap = {};
     for (const job of activeJobs) {
-      const eng = job.assignedTo || job.service?.engineer;
+      const eng = job.service?.engineer;
       if (eng) countMap[eng] = (countMap[eng] || 0) + 1;
     }
 
     res.json(Object.entries(countMap).map(([name, activeJobs]) => ({ name, activeJobs })));
   } catch (err) {
-    console.error("WORKLOAD ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 });
@@ -49,9 +60,9 @@ router.get("/stale", async (req, res) => {
     const days = parseInt(req.query.days || "3");
 
     const jobs = await JobSheet.find({
-    "device.mobileStatus": { $nin: ["Delivered", "Delivered NR/NA", "Repaired"] },
+      "device.mobileStatus": { $nin: ["Delivered", "Delivered NR/NA", "Repaired"] },
       isInvoiced: { $ne: true }
-    }).select("jobSheetNo customer device service statusLogs repairSteps createdAt assignedTo");
+    }).select("jobSheetNo customer device service statusLogs repairSteps createdAt");
 
     const staleJobs = [];
     for (const job of jobs) {
@@ -73,7 +84,6 @@ router.get("/stale", async (req, res) => {
           make: job.device?.make || "-", model: job.device?.model || "-",
           status: job.device?.mobileStatus || "-",
           engineer: job.service?.engineer || "-",
-          assignedTo: job.assignedTo || job.service?.engineer || "-",
           lastActivity, staleDays: diffDays,
         });
       }
@@ -94,35 +104,45 @@ router.get("/filter", async (req, res) => {
     const { status, fromDate, toDate, q, engineer, dealer } = req.query;
     let query = {};
 
-    if (q) {
-      query.$or = [
-        { jobSheetNo:         { $regex: q, $options: "i" } },
-        { "device.imei":      { $regex: q, $options: "i" } },
-        { "customer.contact": { $regex: q, $options: "i" } },
-        { "customer.name":    { $regex: q, $options: "i" } }
-      ];
-    }
+// இதா போடு:
+if (q) {
+  const trimmed = q.trim();
 
+  // Job Sheet No — exact match (234 → JS-234, or JS-234 directly)
+  const isJobNo = /^\d{1,4}$/.test(trimmed) || /^JS-\d+$/i.test(trimmed);
+  if (isJobNo) {
+    const normalized = /^JS-/i.test(trimmed)
+      ? trimmed.toUpperCase()
+      : `JS-${trimmed.padStart(3, "0")}`;
+    query.jobSheetNo = normalized;
+  }
+  // IMEI — exact 15 digit match
+  else if (/^\d{15}$/.test(trimmed)) {
+    query["device.imei"] = trimmed;
+  }
+  // Contact — exact 10 digit match
+  else if (/^\d{10}$/.test(trimmed)) {
+    query["customer.contact"] = trimmed;
+  }
+  // Name — partial match
+  else {
+    query["customer.name"] = { $regex: trimmed, $options: "i" };
+  }
+}
     if (status) query["device.mobileStatus"] = status;
     if (dealer) query["service.dealer"] = { $regex: dealer, $options: "i" };
 
     if (engineer) {
-      const engLower = engineer.trim().toLowerCase();
-      const engineerCondition = [
-        { $expr: { $eq: [{ $toLower: "$assignedTo" }, engLower] } },
-        {
-          $and: [
-            { $or: [{ assignedTo: null }, { assignedTo: "" }, { assignedTo: { $exists: false } }] },
-            { $expr: { $eq: [{ $toLower: "$service.engineer" }, engLower] } }
-          ]
-        }
-      ];
+      const engRegex = { $regex: engineer.trim(), $options: "i" };
       if (query.$or) {
         const textOr = query.$or;
         delete query.$or;
-        query.$and = [{ $or: textOr }, { $or: engineerCondition }];
+        query.$and = [
+          { $or: textOr },
+          { "service.engineer": engRegex }
+        ];
       } else {
-        query.$or = engineerCondition;
+        query["service.engineer"] = engRegex;
       }
     }
 
@@ -167,7 +187,7 @@ router.get("/next-number", async (req, res) => {
 });
 
 /* =====================================================
-   CREATE JOBSHEET — with workload check
+   CREATE JOBSHEET — simple workload check
 ===================================================== */
 router.post("/", upload.single("idProofImage"), async (req, res) => {
   try {
@@ -175,20 +195,8 @@ router.post("/", upload.single("idProofImage"), async (req, res) => {
     const engineerName = serviceData.engineer;
 
     if (engineerName) {
-      const activeCount = await JobSheet.countDocuments({
-        $or: [
-          { assignedTo: engineerName },
-          {
-            $and: [
-              { $or: [{ assignedTo: null }, { assignedTo: "" }, { assignedTo: { $exists: false } }] },
-              { "service.engineer": engineerName }
-            ]
-          }
-        ],
-       "device.mobileStatus": { $nin: ["Delivered", "Delivered NR/NA", "Repaired"] },
-        isInvoiced: { $ne: true },
-      });
-      if (activeCount >= MAX_JOBS) {
+      const load = await getEngineerLoad(engineerName);
+      if (load >= MAX_JOBS) {
         return res.status(400).json({
           message: `${engineerName} is at full capacity (${MAX_JOBS} active jobs). Please choose another engineer.`,
           code: "ENGINEER_FULL",
@@ -209,9 +217,9 @@ router.post("/", upload.single("idProofImage"), async (req, res) => {
         try { return JSON.parse(req.body.createdBy || "{}"); }
         catch { return { username: req.body.createdBy || "", role: "" }; }
       })(),
-      assignedTo:        engineerName || null,
       idProofImage: req.file ? { url: req.file.path, public_id: req.file.filename } : null,
     });
+
     await newJob.save();
     res.status(201).json(newJob);
   } catch (err) {
@@ -257,7 +265,7 @@ router.put("/:id/rebill", async (req, res) => {
 });
 
 /* =====================================================
-   TRANSFER — with workload check
+   TRANSFER — simple workload check
 ===================================================== */
 router.patch("/:id/transfer", async (req, res) => {
   try {
@@ -265,21 +273,8 @@ router.patch("/:id/transfer", async (req, res) => {
     if (!to) return res.status(400).json({ message: "Transfer target required" });
 
     if (to !== "Reception") {
-      const activeCount = await JobSheet.countDocuments({
-        _id: { $ne: req.params.id },
-        $or: [
-          { assignedTo: to },
-          {
-            $and: [
-              { $or: [{ assignedTo: null }, { assignedTo: "" }, { assignedTo: { $exists: false } }] },
-              { "service.engineer": to }
-            ]
-          }
-        ],
-        "device.mobileStatus": { $nin: ["Delivered", "Delivered NR/NA", "Repaired"] },
-        isInvoiced: { $ne: true },
-      });
-      if (activeCount >= MAX_JOBS) {
+      const targetLoad = await getEngineerLoad(to);
+      if (targetLoad >= MAX_JOBS) {
         return res.status(400).json({
           message: `${to} is at full capacity (${MAX_JOBS} jobs). Cannot transfer.`,
           code: "ENGINEER_FULL",
@@ -290,7 +285,7 @@ router.patch("/:id/transfer", async (req, res) => {
     const job = await JobSheet.findByIdAndUpdate(
       req.params.id,
       {
-        $set: { assignedTo: to },
+        $set: { "service.engineer": to },
         $push: { transferLog: { from, to, note: note || "", transferredAt: new Date() } }
       },
       { new: true }
@@ -465,7 +460,6 @@ router.put("/:id/spares", async (req, res) => {
 
 /* =====================================================
    CUSTOMER AUTOCOMPLETE
-   ✅ FIX: Yes or Already Done இருந்தா → "Already Done" prefill
 ===================================================== */
 router.get("/customers/search", async (req, res) => {
   try {
@@ -484,52 +478,35 @@ router.get("/customers/search", async (req, res) => {
     const customers = await JobSheet.aggregate([
       { $match: matchQuery },
       { $sort: { createdAt: -1 } },
-
-      // ✅ Group by name + contact — insta/google values array-ஆ collect பண்ணு
       {
         $group: {
-          _id: {
-            name: "$customer.name",
-            contact: "$customer.contact"
-          },
-          name:        { $first: "$customer.name" },
-          contact:     { $first: "$customer.contact" },
-          altContact:  { $first: "$customer.altContact" },
-          address:     { $first: "$customer.address" },
-          email:       { $first: "$customer.email" },
-          // ✅ CHANGED: $first → $push (all past values collect பண்ணு)
-          instaValues: { $push: "$service.instaFollowers" },
+          _id: { name: "$customer.name", contact: "$customer.contact" },
+          name:         { $first: "$customer.name" },
+          contact:      { $first: "$customer.contact" },
+          altContact:   { $first: "$customer.altContact" },
+          address:      { $first: "$customer.address" },
+          email:        { $first: "$customer.email" },
+          instaValues:  { $push: "$service.instaFollowers" },
           googleValues: { $push: "$service.googleReview" },
-          lastJobDate: { $first: "$createdAt" }
+          lastJobDate:  { $first: "$createdAt" }
         }
       },
-
-      // ✅ NEW: Yes or Already Done = "Already Done" return, மத்தது = ""
       {
         $addFields: {
           instaFollowers: {
             $cond: [
-              { $or: [
-                { $in: ["Already Done", "$instaValues"] },
-                { $in: ["Yes", "$instaValues"] }
-              ]},
-              "Already Done",
-              ""
+              { $or: [{ $in: ["Already Done", "$instaValues"] }, { $in: ["Yes", "$instaValues"] }] },
+              "Already Done", ""
             ]
           },
           googleReview: {
             $cond: [
-              { $or: [
-                { $in: ["Already Done", "$googleValues"] },
-                { $in: ["Yes", "$googleValues"] }
-              ]},
-              "Already Done",
-              ""
+              { $or: [{ $in: ["Already Done", "$googleValues"] }, { $in: ["Yes", "$googleValues"] }] },
+              "Already Done", ""
             ]
           }
         }
       },
-
       { $sort: { name: 1 } },
       { $limit: 15 }
     ]);
@@ -562,11 +539,11 @@ router.put("/:id/cancel", async (req, res) => {
     const updated = await JobSheet.findByIdAndUpdate(
       req.params.id,
       {
-        isCancelled:            true,
-        cancelRemarks:          cancelRemarks.trim(),
-        cancelledBy:            cancelledBy || "admin",
-        cancelledAt:            new Date(),
-        "device.mobileStatus":  "Cancelled",
+        isCancelled:           true,
+        cancelRemarks:         cancelRemarks.trim(),
+        cancelledBy:           cancelledBy || "admin",
+        cancelledAt:           new Date(),
+        "device.mobileStatus": "Cancelled",
         $push: {
           statusLogs: {
             status:    "Cancelled",
@@ -586,18 +563,17 @@ router.put("/:id/cancel", async (req, res) => {
   }
 });
 
-// ✅ இது எப்பவும் கீழே இருக்கணும் (dynamic :id routes last)
+// ✅ Dynamic :id routes — எப்பவும் கீழே இருக்கணும்
 router.get("/:id", getJobSheetById);
 
 router.put("/:id", upload.single("idProofImage"), async (req, res, next) => {
-  // ✅ DEBUG
   console.log("=== PUT ROUTE HIT ===");
   console.log("ID:", req.params.id);
-  const svc = typeof req.body.service === "string" 
-    ? JSON.parse(req.body.service) 
+  const svc = typeof req.body.service === "string"
+    ? JSON.parse(req.body.service)
     : req.body.service;
   console.log("advanceDate from route:", svc?.advanceDate);
-  next(); // controller-க்கு pass பண்ணு
+  next();
 }, updateJobSheet);
 
 module.exports = router;

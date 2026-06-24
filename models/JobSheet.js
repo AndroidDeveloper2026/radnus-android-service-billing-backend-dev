@@ -61,6 +61,7 @@ const JobSheetSchema = new mongoose.Schema({
   idProofImage: { url: String, public_id: String },
 service: {
     engineer: String, dealer: String, drawer: String,
+     
     serviceCharge: Number, spareCharge: Number,
     estimate: String, paymentMode: String,
     repairDate: Date, deliveryDate: Date, 
@@ -78,7 +79,7 @@ googleReview:   { type: String, default: "" },
   statusLogs:  [StatusLogSchema],
   repairSteps: [RepairStepSchema],
 
-  assignedTo:  { type: String, default: null },
+
   transferLog: [TransferLogSchema],
 
   // ✅ NEW — stores each previous invoice before rebill
