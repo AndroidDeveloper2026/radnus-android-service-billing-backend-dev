@@ -60,7 +60,9 @@ router.get("/stale", async (req, res) => {
     const days = parseInt(req.query.days || "3");
 
     const jobs = await JobSheet.find({
-      "device.mobileStatus": { $nin: ["Delivered", "Delivered NR/NA", "Repaired"] },
+      "device.mobileStatus": { $nin: ["Delivered", "Delivered NR/NA", "Repaired", "Cancelled"] },
+      "service.drawer": { $nin: ["Return"] },   // ✅ Return drawer exclude
+      isCancelled: { $ne: true },               // ✅ Cancelled jobs exclude
       isInvoiced: { $ne: true }
     }).select("jobSheetNo customer device service statusLogs repairSteps createdAt");
 
@@ -84,6 +86,7 @@ router.get("/stale", async (req, res) => {
           make: job.device?.make || "-", model: job.device?.model || "-",
           status: job.device?.mobileStatus || "-",
           engineer: job.service?.engineer || "-",
+          assignedTo: job.service?.engineer || "-",
           lastActivity, staleDays: diffDays,
         });
       }
