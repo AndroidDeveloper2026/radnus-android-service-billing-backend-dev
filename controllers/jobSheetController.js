@@ -7,6 +7,10 @@ const JobSheet = require("../models/JobSheet");
 exports.createJobSheet = async (req, res) => {
   try {
 
+    const serviceData = JSON.parse(req.body.service || "{}");
+    const advanceItems = JSON.parse(req.body.advanceItems || "[]");
+    serviceData.advanceItems = advanceItems;
+
     const jobData = {
       jobSheetNo: req.body.jobSheetNo,
 
@@ -20,15 +24,15 @@ exports.createJobSheet = async (req, res) => {
       idProofType: req.body.idProofType,
       idProofImage: req.file?.path || "",
 
-      service: JSON.parse(req.body.service || "{}"),
+      service: serviceData,
 
       // ✅ FIX 1 — spareItems create-ல் add பண்ணோம்
       spareItems: JSON.parse(req.body.spareItems || "[]"),
 
-     createdBy: (() => {
-  try { return JSON.parse(req.body.createdBy || "{}"); }
-  catch { return { username: req.body.createdBy || "", role: "" }; }
-})(),
+      createdBy: (() => {
+        try { return JSON.parse(req.body.createdBy || "{}"); }
+        catch { return { username: req.body.createdBy || "", role: "" }; }
+      })(),
 
     };
 
@@ -114,6 +118,9 @@ exports.updateJobSheet = async (req, res) => {
     const accessories        = typeof req.body.accessories === "string"      ? JSON.parse(req.body.accessories)      : (req.body.accessories       || []);
     const visualIssues       = typeof req.body.visualIssues === "string"     ? JSON.parse(req.body.visualIssues)     : (req.body.visualIssues      || []);
     const spareItems         = typeof req.body.spareItems === "string"       ? JSON.parse(req.body.spareItems)       : (req.body.spareItems        || []);
+    const advanceItems = typeof req.body.advanceItems === "string"
+  ? JSON.parse(req.body.advanceItems)
+  : (req.body.advanceItems || []);
 
     // ✅ Rebill snapshot
     let rebillSnapshot = null;
@@ -140,25 +147,25 @@ exports.updateJobSheet = async (req, res) => {
       spareItems,
 
       // ✅ KEY FIX: service முழுசா explicit build
-      service: {
-        engineer:       serviceData.engineer       || "",
-          softwareEngineer:  serviceData.softwareEngineer  || "", // ADD THIS
-        dealer:         serviceData.dealer         || "",
-        drawer:         serviceData.drawer         || "",
-        serviceRep:     serviceData.serviceRep     || "",
-        serviceCharge:  Number(serviceData.serviceCharge  || 0),
-        spareCharge:    Number(serviceData.spareCharge    || 0),
-        estimate:       serviceData.estimate       || "",
-        paymentMode:    serviceData.paymentMode    || "",
-        repairDate:     serviceData.repairDate     || null,
-        deliveryDate:   serviceData.deliveryDate   || null,
-        advanceAmount:  Number(serviceData.advanceAmount  || 0),
-        advanceDate:    serviceData.advanceDate    || null,  // ✅ இதுதான் fix
-        margin:         Number(serviceData.margin  || 0),
-        instaFollowers: serviceData.instaFollowers || "",
-        googleReview:   serviceData.googleReview   || "",
-        remarks:        serviceData.remarks        || "",
-      },
+     service: {
+  engineer:       serviceData.engineer       || "",
+  softwareEngineer: serviceData.softwareEngineer || "",
+  dealer:         serviceData.dealer         || "",
+  drawer:         serviceData.drawer         || "",
+  serviceRep:     serviceData.serviceRep     || "",
+  serviceCharge:  Number(serviceData.serviceCharge  || 0),
+  spareCharge:    Number(serviceData.spareCharge    || 0),
+  estimate:       serviceData.estimate       || "",
+  paymentMode:    serviceData.paymentMode    || "",
+  repairDate:     serviceData.repairDate     || null,
+  deliveryDate:   serviceData.deliveryDate   || null,
+  advanceAmount:  Number(serviceData.advanceAmount  || 0),
+  advanceItems:   advanceItems,
+  margin:         Number(serviceData.margin  || 0),
+  instaFollowers: serviceData.instaFollowers || "",
+  googleReview:   serviceData.googleReview   || "",
+  remarks:        serviceData.remarks        || "",
+},
     };
 
     if (req.file) {

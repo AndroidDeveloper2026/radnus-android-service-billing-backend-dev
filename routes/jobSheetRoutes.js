@@ -211,7 +211,10 @@ router.post("/", upload.single("idProofImage"), async (req, res) => {
       jobSheetNo:        req.body.jobSheetNo,
       customer:          JSON.parse(req.body.customer   || "{}"),
       device:            { ...JSON.parse(req.body.device || "{}"), idProofType: req.body.idProofType },
-      service:           serviceData,
+service: {
+  ...serviceData,
+  advanceItems: JSON.parse(req.body.advanceItems || "[]"),
+},
       physicalCondition: JSON.parse(req.body.physicalCondition || "[]"),
       accessories:       JSON.parse(req.body.accessories       || "[]"),
       visualIssues:      JSON.parse(req.body.visualIssues      || "[]"),
@@ -300,6 +303,47 @@ router.patch("/:id/transfer", async (req, res) => {
   }
 });
 
+
+ // Manual Job Sheet Insert (specific number)
+router.post('/api/jobsheets/manual-insert', async (req, res) => {
+  try {
+    const {
+      jobSheetNo, customerName, contact, make, model,
+      issue, engineer, serviceRep, serviceCharge,
+      repairDate, deliveryDate
+    } = req.body;
+
+    // Already exists check
+    const existing = await JobSheet.findOne({ jobSheetNo });
+    if (existing) {
+      return res.status(400).json({ message: `${jobSheetNo} already exists` });
+    }
+
+    const newJob = new JobSheet({
+      jobSheetNo,
+      customer: { name: customerName, contact },
+      device:   { make, model },
+      visualIssues: [issue],
+      service: {
+        engineer,
+        serviceRep,
+        serviceCharge: Number(serviceCharge || 0),
+        repairDate,
+        deliveryDate,
+      },
+      physicalCondition: [],
+      accessories: [],
+      spareItems: [],
+    });
+
+    await newJob.save();
+    res.json({ message: 'Inserted ✅', job: newJob });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Insert failed', error: err.message });
+  }
+});
 /* =====================================================
    STATUS UPDATE
 ===================================================== */
@@ -569,14 +613,6 @@ router.put("/:id/cancel", async (req, res) => {
 // ✅ Dynamic :id routes — எப்பவும் கீழே இருக்கணும்
 router.get("/:id", getJobSheetById);
 
-router.put("/:id", upload.single("idProofImage"), async (req, res, next) => {
-  console.log("=== PUT ROUTE HIT ===");
-  console.log("ID:", req.params.id);
-  const svc = typeof req.body.service === "string"
-    ? JSON.parse(req.body.service)
-    : req.body.service;
-  console.log("advanceDate from route:", svc?.advanceDate);
-  next();
-}, updateJobSheet);
+router.put("/:id", upload.single("idProofImage"), updateJobSheet);
 
 module.exports = router;

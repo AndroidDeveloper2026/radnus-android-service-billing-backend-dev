@@ -6,7 +6,12 @@ const SpareItemSchema = new mongoose.Schema({
   rate: Number,
   amount: Number
 });
-
+// இதை ADD பண்ணு:
+const AdvanceItemSchema = new mongoose.Schema({
+  label:  { type: String, default: "" },  // ✅
+  amount: { type: Number, default: 0 },
+  date:   { type: Date }
+});
 const StatusLogSchema = new mongoose.Schema({
   status:    String,
   updatedBy: String,
@@ -67,7 +72,8 @@ service: {
     repairDate: Date, deliveryDate: Date, 
     remarks: String,
     advanceAmount: { type: Number, default: 0 },
-     advanceDate: Date, 
+   advanceItems: { type: [AdvanceItemSchema], default: [] },
+
     margin:        { type: Number, default: 0 },
     serviceRep:    { type: String, default: "" },   // ✅ NEW
 
