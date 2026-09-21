@@ -5,7 +5,7 @@ const SpareItemSchema = new mongoose.Schema({
   qty: Number,
   rate: Number,
   amount: Number,
-  date: { type: Date, default: Date.now }   // ✅ NEW
+date: { type: Date },
 });
 // இதை ADD பண்ணு:
 const AdvanceItemSchema = new mongoose.Schema({

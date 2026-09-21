@@ -70,6 +70,20 @@ exports.updateJobSheet = async (req, res) => {
     const accessories        = typeof req.body.accessories === "string"      ? JSON.parse(req.body.accessories)      : (req.body.accessories       || []);
     const visualIssues       = typeof req.body.visualIssues === "string"     ? JSON.parse(req.body.visualIssues)     : (req.body.visualIssues      || []);
     const spareItems         = typeof req.body.spareItems === "string"       ? JSON.parse(req.body.spareItems)       : (req.body.spareItems        || []);
+
+    // ✅ NEW — never let a spare item silently lose or regain its date on a
+    // routine Update. Match each incoming item to the job's EXISTING spare item
+    // (by _id first, then by position). If the incoming item has no date, keep
+    // the old one. Only a genuinely NEW item (no match in DB) gets today's date.
+    const oldSpareItems = job.spareItems || [];
+    const spareItemsWithPreservedDates = spareItems.map((item, idx) => {
+      if (item.date) return item; // frontend already sent a real date — trust it
+      const old =
+        (item._id && oldSpareItems.find(o => String(o._id) === String(item._id))) ||
+        oldSpareItems[idx];
+      return { ...item, date: old ? old.date : new Date() }; // new item → today
+    });
+
     const advanceItems = typeof req.body.advanceItems === "string"
       ? JSON.parse(req.body.advanceItems)
       : (req.body.advanceItems || []);
@@ -209,7 +223,7 @@ exports.updateJobSheet = async (req, res) => {
       physicalCondition,
       accessories,
       visualIssues,
-      spareItems,
+      spareItems: spareItemsWithPreservedDates,   // ✅ CHANGED — was just "spareItems"
       service: {
         engineer:       serviceData.engineer       || "",
         softwareEngineer: serviceData.softwareEngineer || "",
