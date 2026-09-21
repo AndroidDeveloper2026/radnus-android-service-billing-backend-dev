@@ -44,6 +44,8 @@ router.post("/", async (req, res) => {
   }
 });
 
+// sarathadevi writes here
+
 // DELETE
 router.delete("/:id", async (req, res) => {
   await PhysicalCondition.findByIdAndDelete(req.params.id);
