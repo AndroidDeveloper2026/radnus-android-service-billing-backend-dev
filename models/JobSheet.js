@@ -77,7 +77,10 @@ service: {
     engineer: String, dealer: String, drawer: String,
      
     serviceCharge:{ type: Number, default: 0 }, spareCharge: { type: Number, default: 0 },
-     spareBaseline: { type: Number, default: 0 },   // ✅ FIX — was missing, silently dropped by strict mode
+     
+    
+    spareBaseline: { type: Number, default: 0 },   // ✅ FIX — was missing, silently dropped by strict mode
+     othersBaseline: { type: Number, default: 0 },  // ✅ NEW — same pattern as spareBaseline, for Others cycle-split
      income: { type: Number, default: 0 }, 
      incomeDate: { type: Date, default: null },   // ✅ FIX — missing field caused strict-mode drop
      othersAmount: { type: Number, default: 0 },

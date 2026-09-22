@@ -393,7 +393,13 @@ router.put("/:id/rebill", async (req, res) => {
     };
     // ✅ spareItems array itself is untouched by rebill (stays cumulative),
     // so spareCharge should always equal the sum of it, never hard-reset to 0.
+      // ✅ spareItems array itself is untouched by rebill (stays cumulative),
+    // so spareCharge should always equal the sum of it, never hard-reset to 0.
     const spareTotal = (job.spareItems || []).reduce((s, it) => s + Number(it.amount || 0), 0);
+
+    // ✅ othersItems array itself is untouched by rebill (stays cumulative),
+    // so othersAmount should always equal the sum of it, never hard-reset to 0.
+    const othersTotal = (job.service?.othersItems || []).reduce((s, it) => s + Number(it.amount || 0), 0);
 
     await JobSheet.findByIdAndUpdate(req.params.id, {
       $set: {
@@ -401,14 +407,14 @@ router.put("/:id/rebill", async (req, res) => {
         rebillPending: true,
         "device.mobileStatus": "Received",
         "service.serviceCharge": 0,
-        "service.spareCharge": spareTotal,   // stays cumulative
-           "service.spareBaseline": currentSpare, 
-            "service.advanceBaseline": currentAdvance,
+        "service.spareCharge": spareTotal,        // ✅ FIX — spareTotal now defined here
+        "service.spareBaseline": currentSpare,
+        "service.advanceBaseline": currentAdvance,
+        "service.othersBaseline": currentOthers,  // ✅ FIX — only ONE copy now (duplicate removed)
         "service.income": 0,
         "service.incomeDate": null,
-        "service.othersAmount": 0,
+        "service.othersAmount": othersTotal,      // ✅ FIX — duplicate "othersAmount":0 line removed
         "service.remarks": "",
-     
       },
       $push: {
         statusLogs: {
@@ -565,49 +571,6 @@ router.delete("/:id/steps/:stepId", async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
-/* =====================================================
-   SEND WHATSAPP (MANUAL) — ✅ NEW
-   Lets the shop manually re-send the current Device Status message to the
-   customer (e.g. customer says they missed the auto-sent message). Always
-   sends whatever status is currently SAVED in the DB — not any unsaved
-   edit in the open form — so the frontend should prompt "Update" first if
-   there are unsaved changes.
-===================================================== */
-router.post("/:id/send-whatsapp", async (req, res) => {
-  try {
-    const job = await JobSheet.findById(req.params.id);
-    if (!job) return res.status(404).json({ message: "Job not found" });
-
-    if (!job.customer?.contact) {
-      return res.status(400).json({ message: "No contact number on this job sheet" });
-    }
-
-    const status = job.device?.mobileStatus;
-    if (!status) {
-      return res.status(400).json({ message: "No Device Status set on this job sheet" });
-    }
-
-    const sent = await sendJobStatusWhatsApp(
-      job.customer.contact,
-      job.customer.name,
-      job.jobSheetNo,
-      status
-    );
-
-    if (sent) {
-      res.json({ message: `WhatsApp message sent for status "${status}" ✅` });
-    } else {
-      // sendJobStatusWhatsApp returns false for: unmapped status (e.g. "Cancelled"),
-      // invalid 10-digit contact, or a Meta API failure (already logged server-side).
-      res.status(400).json({
-        message: `Could not send WhatsApp message — check the contact number is valid and "${status}" has a mapped message.`
-      });
-    }
-  } catch (err) {
-    console.error("SEND WHATSAPP (MANUAL) ERROR:", err);
-    res.status(500).json({ message: err.message });
-  }
-});
 
 /* =====================================================
    EMAIL
@@ -684,10 +647,13 @@ router.put("/:id/invoice", async (req, res) => {
     const finalStatus =
       currentStatus === "Delivered NR/NA" ? "Delivered NR/NA" : "Delivered";
 
-    const updated = await JobSheet.findByIdAndUpdate(
+     const updated = await JobSheet.findByIdAndUpdate(
       req.params.id,
       {
         isInvoiced: true,
+        rebillPending: false,   // ✅ FIX — invoice பண்றது rebill cycle-ஐ முடிச்சிடும்.
+                                 // Update click பண்ணாம நேரடியா Invoice பண்ணினாலும்
+                                 // "Save Rebill" label அடுத்த தடவை தப்பா காட்டாம இருக்க.
         "device.mobileStatus": finalStatus,
       },
       { new: true }
