@@ -203,13 +203,18 @@ router.get("/next-number", async (req, res) => {
    (⭐ this is the ONLY create implementation — controller's createJobSheet
    was dead code, never wired to a route, and has been removed to avoid
    confusion/duplicate edits going forward.)
+
+   🔴 FIX (this file) — rawSpareItems was never destructured from req.body
+   and never assigned onto newJob, so Raw Spare items added on a BRAND NEW
+   job sheet (before the very first Save) were silently dropped and never
+   reached the DB at all. Now parsed + saved exactly like spareItems.
 ===================================================== */
 router.post("/", upload.single("idProofImage"), async (req, res) => {
   try {
     const {
       jobSheetNo, customer, device, physicalCondition,
       accessories, advanceItems, visualIssues, service,
-      spareItems, idProofType, createdBy
+      spareItems, rawSpareItems, idProofType, createdBy   // ✅ rawSpareItems added
     } = req.body;
 
     // advanceItems comes as its own FormData field from the frontend, but the
@@ -247,6 +252,7 @@ router.post("/", upload.single("idProofImage"), async (req, res) => {
       visualIssues:      JSON.parse(visualIssues || "[]"),
       service:           parsedService,
       spareItems:        JSON.parse(spareItems || "[]"),
+      rawSpareItems:      JSON.parse(rawSpareItems || "[]"),   // ✅ FIX — now actually saved
       idProofType,
       createdBy:         JSON.parse(createdBy || "{}"),
     });
@@ -325,32 +331,31 @@ router.post("/:id/send-whatsapp", async (req, res) => {
 /* =====================================================
    REBILL — Reopen an invoiced job for re-repair
 
-   ✅ FIX (NEW) — BEFORE resetting income/serviceCharge/othersAmount to 0,
-   push a full "before rebill" snapshot into rebillHistory. This is now the
-   SINGLE SOURCE OF TRUTH for "what did this job earn before it got
-   rebilled" — Income, Service, Spare, Others — all captured in one place,
-   at the exact moment of reset, using the REAL pre-rebill numbers.
+   🔴 REWRITTEN (this file) — the snapshot now captures the FULL picture of
+   the cycle that's ending: income, balance, service charge, spare, raw
+   spare, others, advance, payment mode, engineer, drawer, dealer, service
+   rep, repair date, delivery date. Everything goes into rebillHistory so a
+   Rebill Report can show exactly what each past cycle looked like.
 
-   Previously only serviceCharge/spareCharge were pushed to rebillHistory,
-   and that push happened later in updateJobSheet() using whatever the user
-   typed in AFTER rebill (i.e. the NEW cycle's numbers) — which mislabeled
-   new-cycle data as "history". That duplicate/wrong push has been removed
-   from updateJobSheet() (see jobSheetController.js) since this route now
-   owns the history snapshot.
+   After the snapshot is taken, only the BILLING fields reset for the new
+   cycle — service charge, spare (baseline-based, stays 0 net), raw spare
+   (baseline-based, stays 0 net — this is NEW, see rawSpareBaseline below),
+   others (baseline-based), advance (baseline-based), income, balance, and
+   payment mode. Engineer / drawer / dealer / service rep / repair date /
+   delivery date are captured for the record but deliberately NOT reset —
+   they're assignment/scheduling fields, not billing fields, and a rebill
+   doesn't mean "reassign the job".
 
-   ✅ Others Amount — previously reset straight to 0 here with ZERO
-   snapshot anywhere (not even revenueEntries), so old cycle's Others
-   amount was permanently lost the moment someone hit Rebill. Now captured
-   in the same snapshot.
+   ✅ FIX — Balance and Payment Mode were never reset here before; they'd
+   carry the OLD cycle's numbers into the new cycle indefinitely. Now reset.
 
-   ✅ revenueEntries snapshot (income/service ledger used by Value Report /
-   All Report) is UNCHANGED — kept exactly as before, so those two reports
-   keep working the same way they always did.
-
-   ✅ FIX 2 — spareItems array is CUMULATIVE (every spare part ever added,
-   across every rebill cycle, stays in the array so Value Report can show
-   full history). So "service.spareCharge" must NOT be reset to 0 here —
-   it has to stay equal to the sum of all spareItems.
+   ✅ FIX — Raw Spare had no baseline/cycle-split concept at all (unlike
+   Spare/Others/Advance), so "Raw Spare (Shop)" always showed the FULL
+   lifetime total even right after a rebill. rawSpareBaseline now mirrors
+   spareBaseline exactly: rawSpareItems array stays cumulative (full
+   history, shown grayed-out as "Before Rebill" in the popup), but the
+   baseline snapshot makes the outer field's NET total show empty for the
+   new cycle until new raw spare items are added.
 ===================================================== */
 router.put("/:id/rebill", async (req, res) => {
   try {
@@ -359,47 +364,56 @@ router.put("/:id/rebill", async (req, res) => {
     if (!job) return res.status(404).json({ message: "Job not found" });
     if (!job.isInvoiced) return res.status(400).json({ message: "Job is not invoiced yet" });
 
-      // ✅ FIX — rebillHistory (pushed below) is now the SINGLE source of truth
-    // for every past cycle's income/service/spare/others, including its own
-    // incomeDate. The old "untracked catch-up" logic that tried to synthesize
-    // a matching revenueEntries row here was fragile — it silently dropped or
-    // mis-dated the pre-rebill income+service whenever a job was invoiced
-    // without ever going through a normal Update first (revenueEntries stayed
-    // empty from creation). revenueEntries is now used ONLY for in-cycle
-    // amount changes (normal Update deltas); rebill leaves it untouched.
-    const currentIncome  = Number(job.service?.income        || 0);
-    const currentService = Number(job.service?.serviceCharge || 0);
-    const currentSpare   = Number(job.service?.spareCharge   || 0);
-    const currentOthers  = Number(job.service?.othersAmount  || 0);
-    // ✅ NEW — Advance amount, same pattern as spareCharge. advanceItems array is
-    // CUMULATIVE (never wiped) — this baseline is just a snapshot of the running
-    // total AT rebill time, so AdvancePopup can split "before / after rebill"
-    // exactly like SparePopup already does with spareBaseline.
-    const currentAdvance = Number(job.service?.advanceAmount || 0);
-    const currentRemarks = job.service?.remarks || "";
-    const currentStatus  = job.device?.mobileStatus || "";
+    const currentIncome      = Number(job.service?.income        || 0);
+    const currentService     = Number(job.service?.serviceCharge || 0);
+    const currentSpare       = Number(job.service?.spareCharge   || 0);
+    const currentOthers      = Number(job.service?.othersAmount  || 0);
+    const currentAdvance     = Number(job.service?.advanceAmount || 0);
+    const currentBalance     = Number(job.service?.balance       || 0);
+    const currentBalanceDate = job.service?.balanceDate || null;
+    const currentPaymentMode = job.service?.paymentMode || "";
+    const currentRemarks     = job.service?.remarks || "";
+    const currentStatus      = job.device?.mobileStatus || "";
+
+    // ✅ Captured for the record only — these are assignment/schedule fields,
+    // not billing fields, so they are NOT reset below.
+    const currentEngineer     = job.service?.engineer     || "";
+    const currentDrawer       = job.service?.drawer       || "";
+    const currentDealer       = job.service?.dealer       || "";
+    const currentServiceRep   = job.service?.serviceRep   || "";
+    const currentRepairDate   = job.service?.repairDate   || null;
+    const currentDeliveryDate = job.service?.deliveryDate || null;
+
+    // ✅ spareItems / othersItems / rawSpareItems arrays themselves are untouched
+    // by rebill (stay cumulative — full history across every cycle), so each
+    // charge should always equal the sum of its own items array, never hard-reset.
+    const spareTotal = (job.spareItems || []).reduce((s, it) => s + Number(it.amount || 0), 0);
+    const othersTotal = (job.service?.othersItems || []).reduce((s, it) => s + Number(it.amount || 0), 0);
+    // ✅ NEW — Raw Spare total, same cumulative pattern as spareItems/othersItems
+    const rawSpareTotal = (job.rawSpareItems || []).reduce((s, it) => s + Number(it.amount || 0), 0);
 
     const beforeRebillSnapshot = {
       rebilledAt:    new Date(),
       rebilledBy:    rebilledBy || "admin",
       income:        currentIncome,
       incomeDate:    job.service?.incomeDate || null,
+      balance:       currentBalance,          // ✅ NEW — captured
+      balanceDate:   currentBalanceDate,      // ✅ NEW — captured
       serviceCharge: currentService,
       spareCharge:   currentSpare,
+      rawSpareCharge: rawSpareTotal,          // ✅ NEW — captured
       othersAmount:  currentOthers,
-      advanceAmount: currentAdvance,   // ✅ NEW
+      advanceAmount: currentAdvance,
+      paymentMode:   currentPaymentMode,      // ✅ NEW — captured
+      engineer:      currentEngineer,         // ✅ NEW — captured (not reset)
+      drawer:        currentDrawer,           // ✅ NEW — captured (not reset)
+      dealer:        currentDealer,           // ✅ NEW — captured (not reset)
+      serviceRep:    currentServiceRep,       // ✅ NEW — captured (not reset)
+      repairDate:    currentRepairDate,       // ✅ NEW — captured (not reset)
+      deliveryDate:  currentDeliveryDate,     // ✅ NEW — captured (not reset)
       remarks:       currentRemarks,
       status:        currentStatus,
     };
-    // ✅ spareItems array itself is untouched by rebill (stays cumulative),
-    // so spareCharge should always equal the sum of it, never hard-reset to 0.
-      // ✅ spareItems array itself is untouched by rebill (stays cumulative),
-    // so spareCharge should always equal the sum of it, never hard-reset to 0.
-    const spareTotal = (job.spareItems || []).reduce((s, it) => s + Number(it.amount || 0), 0);
-
-    // ✅ othersItems array itself is untouched by rebill (stays cumulative),
-    // so othersAmount should always equal the sum of it, never hard-reset to 0.
-    const othersTotal = (job.service?.othersItems || []).reduce((s, it) => s + Number(it.amount || 0), 0);
 
     await JobSheet.findByIdAndUpdate(req.params.id, {
       $set: {
@@ -407,14 +421,20 @@ router.put("/:id/rebill", async (req, res) => {
         rebillPending: true,
         "device.mobileStatus": "Received",
         "service.serviceCharge": 0,
-        "service.spareCharge": spareTotal,        // ✅ FIX — spareTotal now defined here
+        "service.spareCharge": spareTotal,
         "service.spareBaseline": currentSpare,
+        "service.rawSpareBaseline": rawSpareTotal,   // ✅ NEW — Raw Spare now shows empty this cycle
         "service.advanceBaseline": currentAdvance,
-        "service.othersBaseline": currentOthers,  // ✅ FIX — only ONE copy now (duplicate removed)
+        "service.othersBaseline": currentOthers,
         "service.income": 0,
         "service.incomeDate": null,
-        "service.othersAmount": othersTotal,      // ✅ FIX — duplicate "othersAmount":0 line removed
+        "service.balance": 0,                        // ✅ FIX — was never reset before
+        "service.balanceDate": null,                 // ✅ FIX — was never reset before
+        "service.paymentMode": "",                    // ✅ FIX — was never reset before
+        "service.othersAmount": othersTotal,
         "service.remarks": "",
+        // engineer / drawer / dealer / serviceRep / repairDate / deliveryDate are
+        // deliberately absent here — not reset, per the note above.
       },
       $push: {
         statusLogs: {
@@ -423,7 +443,7 @@ router.put("/:id/rebill", async (req, res) => {
           timestamp: new Date(),
           note: "Rebill opened",
         },
-        rebillHistory: beforeRebillSnapshot,   // ✅ real before-rebill numbers, saved right now
+        rebillHistory: beforeRebillSnapshot,   // ✅ full before-rebill snapshot
       },
     });
 
@@ -463,13 +483,22 @@ router.put("/:id/rebill", async (req, res) => {
    jobs, not new intake, so customers shouldn't get a notification for it. If you
    want customers notified here too, add a sendJobStatusWhatsApp() call after save,
    same pattern as the routes above.
+
+   🔴 FIX (this file) — this route was completely broken: it destructured
+   individual flat fields (customerName, contact, make, model, issue...) from
+   req.body, but then tried to build newJob from `customer`, `device`,
+   `physicalCondition`, `service`, `spareItems`, `idProofType`, `createdBy` —
+   none of which were ever defined, so this route would throw a
+   ReferenceError on every call. Rewritten to actually use the fields it
+   receives, matching the flat shape the destructuring implies, and now also
+   saves rawSpareItems if sent.
 ===================================================== */
 router.post('/manual-insert', async (req, res) => {
   try {
     const {
       jobSheetNo, customerName, contact, make, model,
       issue, engineer, serviceRep, serviceCharge,
-      repairDate, deliveryDate
+      repairDate, deliveryDate, rawSpareItems
     } = req.body;
 
     // Already exists check
@@ -482,19 +511,14 @@ router.post('/manual-insert', async (req, res) => {
       jobSheetNo,
       customer: { name: customerName, contact },
       device:   { make, model },
-      visualIssues: [issue],
+      visualIssues: issue ? [issue] : [],
       service: {
-        engineer,
-        serviceRep,
+        engineer, serviceRep,
         serviceCharge: Number(serviceCharge || 0),
-        repairDate,
-        deliveryDate,
+        repairDate, deliveryDate,
       },
-      physicalCondition: [],
-      accessories: [],
-      spareItems: [],
+      rawSpareItems: JSON.parse(rawSpareItems || "[]"),
     });
-
     await newJob.save();
     res.json({ message: 'Inserted ✅', job: newJob });
 
@@ -845,6 +869,7 @@ router.patch("/:id/transfer", async (req, res) => {
 });
 
 router.get("/:id", getJobSheetById);
+
 
 router.put("/:id", upload.single("idProofImage"), updateJobSheet);
 

@@ -84,6 +84,21 @@ exports.updateJobSheet = async (req, res) => {
       return { ...item, date: old ? old.date : new Date() }; // new item → today
     });
 
+    // ✅ NEW — Raw Spare (shop purchase inventory), same date-preservation
+    // pattern as spareItems above.
+    const rawSpareItems = typeof req.body.rawSpareItems === "string"
+      ? JSON.parse(req.body.rawSpareItems)
+      : (req.body.rawSpareItems || []);
+
+    const oldRawSpareItems = job.rawSpareItems || [];
+    const rawSpareItemsWithPreservedDates = rawSpareItems.map((item, idx) => {
+      if (item.date) return item;
+      const old =
+        (item._id && oldRawSpareItems.find(o => String(o._id) === String(item._id))) ||
+        oldRawSpareItems[idx];
+      return { ...item, date: old ? old.date : new Date() };
+    });
+
     const advanceItems = typeof req.body.advanceItems === "string"
       ? JSON.parse(req.body.advanceItems)
       : (req.body.advanceItems || []);
@@ -103,37 +118,7 @@ exports.updateJobSheet = async (req, res) => {
       ? new Date(`${serviceData.incomeDate}T00:00:00`)
       : new Date();
 
-    /* ================= REVENUE ENTRIES — SELF-CORRECTING REBUILD (FIX) =================
-       🔴 BUG (old code) — a NEW row was pushed to revenueEntries only when Income/
-       Service went UP versus the last save (`Math.max(0, new - old)`). If the user
-       typed a wrong amount, saved (a row got pushed for that INCREASE), then
-       corrected it back down on the SAME day, the decrease produced a delta of
-       0 (Math.max clamps negatives to 0) — so nothing was pushed for the
-       correction, but the earlier wrong-amount row was NEVER removed either.
-       The top-level income/serviceCharge fields ended up correct, but
-       revenueEntries silently kept the stale, too-high row forever — which is
-       exactly what Value Report / Service Report / Income Report / My Report
-       sum from, so the mistake kept reappearing in every report even after
-       being "fixed" and deleted on the Job Sheet itself.
 
-       ✅ FIX — instead of ever pushing a raw delta, TODAY's entry (matching
-       revenueDate's calendar day) is fully RECOMPUTED on every save:
-         today's service = current serviceCharge total − (sum of every OTHER
-                            day's service entries in this cycle)
-         today's income  = current income total        − (sum of every OTHER
-                            day's income  entries in this cycle)
-       Any existing entry for today's date is replaced (not appended to), so
-       typing a value, saving, then correcting it and saving again — all on
-       the same day — always converges to the true current amount instead of
-       stacking corrections as extra permanent rows.
-
-       Entries from BEFORE the current rebill cycle (i.e. already invoiced,
-       pre-rebill history) are left completely untouched — only the live,
-       still-open cycle's entries are ever rebuilt this way. A day that's not
-       "today" can't be self-corrected by a later save (that historical
-       mistake needs a one-time manual cleanup), but this stops the bug from
-       happening again on the SAME day going forward — which covers the
-       common "typo → immediately notice → fix" case entirely. */
     const rebillHistoryArr = job.rebillHistory || [];
     const lastRebill = rebillHistoryArr.length > 0
       ? rebillHistoryArr[rebillHistoryArr.length - 1]
@@ -223,7 +208,8 @@ exports.updateJobSheet = async (req, res) => {
       physicalCondition,
       accessories,
       visualIssues,
-      spareItems: spareItemsWithPreservedDates,   // ✅ CHANGED — was just "spareItems"
+       spareItems: spareItemsWithPreservedDates,   // ✅ CHANGED — was just "spareItems"
+      rawSpareItems: rawSpareItemsWithPreservedDates,  
       service: {
         engineer:       serviceData.engineer       || "",
         softwareEngineer: serviceData.softwareEngineer || "",
@@ -238,16 +224,24 @@ exports.updateJobSheet = async (req, res) => {
         // on the next Update — which would erase the rebill-cycle spare baseline
         // and bring back the wrong Service Charge auto-calc bug.
         spareBaseline:  Number(serviceData.spareBaseline  || 0),
+        // ✅ FIX — rawSpareBaseline was missing from this explicit list entirely, so
+        // every normal Update silently wiped the rebill-cycle Raw Spare baseline
+        // back to undefined → 0, making the Raw Spare field show its FULL lifetime
+        // total again the moment anyone hit Update after a rebill.
+        rawSpareBaseline: Number(serviceData.rawSpareBaseline || 0),
         income:         Number(serviceData.income  || 0),
         incomeDate:     serviceData.incomeDate     || null,
+        balance:        Number(serviceData.balance || 0),
+        balanceDate:    serviceData.balanceDate    || null,
         othersAmount:   Number(serviceData.othersAmount || 0),
         othersItems:    serviceData.othersItems || [],
         paymentMode:    serviceData.paymentMode    || "",
         repairDate:     serviceData.repairDate     || null,
         deliveryDate:   serviceData.deliveryDate   || null,
         advanceAmount:  Number(serviceData.advanceAmount  || 0),
-     
-      
+        // ✅ FIX — advanceDate was missing from this explicit list entirely, so it
+        // was silently wiped to undefined on every normal Update.
+        advanceDate:    serviceData.advanceDate    || null,
            advanceBaseline: Number(serviceData.advanceBaseline || 0),  
                  othersBaseline: Number(serviceData.othersBaseline || 0),   
         advanceItems:   advanceItems,
