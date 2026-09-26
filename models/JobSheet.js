@@ -9,20 +9,9 @@ const SpareItemSchema = new mongoose.Schema({
   isReturned:   { type: Boolean, default: false },
   returnDate:   { type: Date,    default: null },
   returnReason: { type: String,  default: "" },
-  // ✅ NEW — where a Spare Used item came from: bought fresh for this job
-  // ("market", default) or consumed from the Raw Spare stock log ("raw").
-  // Without this field, strict-mode Mongoose silently dropped it on every
-  // save, so every Used Spare item showed up as "Market" in the Report
-  // regardless of what the popup actually sent.
+  
   source: { type: String, enum: ["market", "raw"], default: "market" },
-  // ✅ NEW — set to true ONLY on a raw entry that got marked Returned via
-  // the Spare Used two-way sync (SparePopup.confirmReturn), never on a
-  // manual return done inside RawSparePopup. The Spare Return Report uses
-  // this to skip synced entries on the "Raw Spare" side — they're already
-  // shown once under "Spare Used" — so the same physical return doesn't
-  // show up as two rows. Without this field on the schema, strict mode
-  // was silently dropping it on save, so every raw return kept showing up
-  // twice no matter what the frontend sent.
+ //job sheet scehama
   syncedReturn: { type: Boolean, default: false },
 });
 // இதை ADD பண்ணு:
