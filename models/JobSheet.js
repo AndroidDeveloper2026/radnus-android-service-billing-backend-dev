@@ -6,13 +6,15 @@ const SpareItemSchema = new mongoose.Schema({
   rate: Number,
   amount: Number,
   date: { type: Date },
-  // ✅ NEW — Spare Return tracking (used mainly for rawSpareItems: shop bought a
-  // spare, fitted it to test, didn't work → mark Returned instead of deleting the
-  // row, so it stays visible in history + Spare Return Report, but drops out of the
-  // active Raw Spare Total).
   isReturned:   { type: Boolean, default: false },
   returnDate:   { type: Date,    default: null },
   returnReason: { type: String,  default: "" },
+  // ✅ NEW — where a Spare Used item came from: bought fresh for this job
+  // ("market", default) or consumed from the Raw Spare stock log ("raw").
+  // Without this field, strict-mode Mongoose silently dropped it on every
+  // save, so every Used Spare item showed up as "Market" in the Report
+  // regardless of what the popup actually sent.
+  source: { type: String, enum: ["market", "raw"], default: "market" },
 });
 // இதை ADD பண்ணு:
 const AdvanceItemSchema = new mongoose.Schema({
