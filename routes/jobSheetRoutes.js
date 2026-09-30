@@ -253,7 +253,8 @@ router.post("/", upload.single("idProofImage"), async (req, res) => {
       service:           parsedService,
       spareItems:        JSON.parse(spareItems || "[]"),
       rawSpareItems:      JSON.parse(rawSpareItems || "[]"),   // ✅ FIX — now actually saved
-      idProofType,
+          idProofType,
+      engineerStatus: ({ Received: "Received", Pending: "Repairing", Repaired: "Ready" })[JSON.parse(device || "{}").mobileStatus] || "Received",
       createdBy:         JSON.parse(createdBy || "{}"),
     });
 
@@ -419,7 +420,8 @@ router.put("/:id/rebill", async (req, res) => {
       $set: {
         isInvoiced: false,
         rebillPending: true,
-        "device.mobileStatus": "Received",
+              "device.mobileStatus": "Received",
+        engineerStatus: "Received",
         "service.serviceCharge": 0,
         "service.spareCharge": spareTotal,
         "service.spareBaseline": currentSpare,
@@ -536,27 +538,15 @@ router.patch("/:id/status", async (req, res) => {
     const { status, updatedBy } = req.body;
     const job = await JobSheet.findByIdAndUpdate(
       req.params.id,
-      { "device.mobileStatus": status, $push: { statusLogs: { status, updatedBy, timestamp: new Date() } } },
+      { engineerStatus: status, $push: { statusLogs: { status, updatedBy, timestamp: new Date() } } },
       { new: true }
     );
-
-    // ✅ this endpoint changes Device Status directly (separate from the full
-    // Update flow), so it needs its own WhatsApp trigger too.
-    if (job?.customer?.contact && status) {
-      sendJobStatusWhatsApp(
-        job.customer.contact,
-        job.customer.name,
-        job.jobSheetNo,
-        status
-      );
-    }
 
     res.json(job);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
-
 /* =====================================================
    REPAIR STEPS
 ===================================================== */

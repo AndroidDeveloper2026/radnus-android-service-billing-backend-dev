@@ -158,7 +158,7 @@ isCancelled:   { type: Boolean, default: false },
 cancelRemarks: { type: String,  default: "" },
 cancelledBy:   { type: String,  default: "" },
 cancelledAt:   { type: Date },
-  
+    engineerStatus: { type: String, default: "" },   // engineer dashboard-oda own status
   isInvoiced:    { type: Boolean, default: false },
 rebillPending: { type: Boolean, default: false },  // ✅ இதை add பண்ணு
 
