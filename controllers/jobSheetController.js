@@ -2,7 +2,8 @@ const generatePDF = require("../utils/generatePDF");
 const sendEmail = require("../utils/sendEmail");
 const JobSheet = require("../models/JobSheet");
 const { sendJobStatusWhatsApp } = require("../utils/sendWhatsApp"); // ✅ WhatsApp
-const { scope } = require("../middleware/authMiddleware"); // ✅ multi-store
+
+
 
 
 /* ================= GET ALL ================= */
@@ -10,7 +11,7 @@ exports.getJobSheets = async (req, res) => {
 
   try {
 
-    const jobs = await JobSheet.find({ ...scope(req) }).sort({ createdAt: -1 });
+    const jobs = await JobSheet.find().sort({ createdAt: -1 });
 
     res.json(jobs);
 
@@ -210,11 +211,9 @@ exports.updateJobSheet = async (req, res) => {
       newRevenueEntries = [...priorCycleEntries, ...rebuiltCurrentCycle];
     }
 
-   
     // ✅ Build update — service object EXPLICIT-ஆ (எந்த field-உம் miss ஆகாது)
     const updateData = {
-      // jobSheetNo + storeId are intentionally NOT updatable here — numbers are allocated
-      // per store on create and must never change afterwards.
+      jobSheetNo:        req.body.jobSheetNo,
       customer:          customerData,
       device:            { ...deviceData, idProofType: req.body.idProofType },
       physicalCondition,
@@ -387,10 +386,10 @@ Thank you for choosing Radnus Communication.
 // with the Salesrep Report — e.g. a login username that differs from the assigned
 // Service Rep name won't cause a mismatch.
 exports.getUserReport = async (req, res) => {
-   try {
+  try {
     const { jobSheetNo, fromDate, toDate } = req.query;
 
-    const query = { ...scope(req) }; // ✅ multi-store
+    const query = {};
 
     if (jobSheetNo && jobSheetNo.trim()) {
       const q = jobSheetNo.trim();

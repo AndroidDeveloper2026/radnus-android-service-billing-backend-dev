@@ -1,6 +1,5 @@
-const express  = require("express");
-const mongoose = require("mongoose");
-const router   = express.Router();
+const express = require("express");
+const router  = express.Router();
 
 const JobSheet = require("../models/JobSheet");
 const upload   = require("../middleware/upload");
@@ -9,11 +8,6 @@ const generateInvoicePDF = require("../utils/generateInvoicePDF");
 const sendEmail          = require("../utils/sendEmail");
 const { sendJobStatusWhatsApp } = require("../utils/sendWhatsApp"); // ✅ WhatsApp
 
-// ✅ MULTI-STORE
-const { scope, requireStore, authorize } = require("../middleware/authMiddleware");
-const { getStores, getStoreById, escapeRegex } = require("../utils/storeHelpers");
-const { saveWithNewNumber, peekNextJobNo } = require("../utils/jobNumber");
-
 const {
   sendEstimateEmail,
   updateJobSheet,
@@ -21,27 +15,10 @@ const {
   getUserReport,
 } = require("../controllers/jobSheetController");
 
+
 /* =====================================================
    WORKLOAD HELPER — simple 1 job = 1 point
 ===================================================== */
-/* =====================================================
-   ✅ MULTI-STORE GUARD — runs for EVERY route that has an :id in its path
-   (/:id, /:id/rebill, /:id/status, /:id/steps, /send-invoice/:id ...).
-   If the job isn't in the caller's store it answers 404 — so a user from
-   store A can never read or change a store B job even if they guess its id.
-   admin/gm in "all stores" view pass through (scope() is {}).
-===================================================== */
-router.param("id", async (req, res, next, id) => {
-  try {
-    if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: "Invalid job sheet id" });
-    const ok = await JobSheet.exists({ _id: id, ...scope(req) });
-    if (!ok) return res.status(404).json({ message: "Job not found" });
-    next();
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
 const getEngineerLoad = async (name) => {
   const count = await JobSheet.countDocuments({
     "service.engineer": name,
@@ -59,7 +36,6 @@ router.get("/user-report", getUserReport);
 router.get("/workload", async (req, res) => {
   try {
     const activeJobs = await JobSheet.find({
-      ...scope(req),
       "device.mobileStatus": { $nin: ["Delivered", "Delivered NR/NA", "Repaired"] },
       isInvoiced: { $ne: true },
     }).select("service.engineer");
@@ -81,10 +57,9 @@ router.get("/workload", async (req, res) => {
 ===================================================== */
 router.get("/stale", async (req, res) => {
   try {
-     const days = parseInt(req.query.days || "3");
+    const days = parseInt(req.query.days || "3");
 
     const jobs = await JobSheet.find({
-      ...scope(req),
       "device.mobileStatus": { $nin: ["Delivered", "Delivered NR/NA", "Repaired", "Cancelled"] },
       "service.drawer": { $nin: ["Return"] },   // ✅ Return drawer exclude
       isCancelled: { $ne: true },               // ✅ Cancelled jobs exclude
@@ -130,45 +105,37 @@ router.get("/stale", async (req, res) => {
 router.get("/filter", async (req, res) => {
   try {
     const { status, fromDate, toDate, q, engineer, dealer } = req.query;
-    let query = { ...scope(req) }; // ✅ multi-store
+    let query = {};
 
     if (q) {
-      const trimmed = String(q).trim();
-      const upper   = trimmed.toUpperCase();
-      const stores  = await getStores();
+      const trimmed = q.trim();
 
-      // Full job number typed, e.g. JS-234 or CBE-JS-045 (any known store prefix)
-      const typedPrefix = stores.find((st) => upper.startsWith(`${st.jobPrefix}-`));
-      const isFullJobNo = typedPrefix && /^\d+$/.test(upper.slice(typedPrefix.jobPrefix.length + 1));
-
-      if (isFullJobNo) {
-        query.jobSheetNo = upper;
-      }
-      // Just digits (1-4) → job number inside the current store: 234 → JS-234 / CBE-JS-234
-      else if (/^\d{1,4}$/.test(trimmed)) {
-        const myStore = req.storeId ? stores.find((st) => String(st._id) === req.storeId) : null;
-        query.jobSheetNo = myStore
-          ? `${myStore.jobPrefix}-${trimmed.padStart(3, "0")}`
-          : { $regex: `(^|-)0*${Number(trimmed)}$` }; // admin/gm "all stores" view
+      // Job Sheet No — exact match (234 → JS-234, or JS-234 directly)
+      const isJobNo = /^\d{1,4}$/.test(trimmed) || /^JS-\d+$/i.test(trimmed);
+      if (isJobNo) {
+        const normalized = /^JS-/i.test(trimmed)
+          ? trimmed.toUpperCase()
+          : `JS-${trimmed.padStart(3, "0")}`;
+        query.jobSheetNo = normalized;
       }
       // IMEI — exact 15 digit match
       else if (/^\d{15}$/.test(trimmed)) {
         query["device.imei"] = trimmed;
       }
       // Contact — exact 10 digit match
-         else if (/^\d{10}$/.test(trimmed)) {
+      else if (/^\d{10}$/.test(trimmed)) {
         query["customer.contact"] = trimmed;
       }
-      // Name — partial match (escaped: typing "(" used to crash this with a 500)
+      // Name — partial match
       else {
-        query["customer.name"] = { $regex: escapeRegex(trimmed), $options: "i" };
+        query["customer.name"] = { $regex: trimmed, $options: "i" };
       }
     }
     if (status) query["device.mobileStatus"] = status;
-    if (dealer) query["service.dealer"] = { $regex: escapeRegex(dealer), $options: "i" };
+    if (dealer) query["service.dealer"] = { $regex: dealer, $options: "i" };
 
     if (engineer) {
-      const engRegex = { $regex: escapeRegex(engineer.trim()), $options: "i" };
+      const engRegex = { $regex: engineer.trim(), $options: "i" };
       if (query.$or) {
         const textOr = query.$or;
         delete query.$or;
@@ -219,11 +186,13 @@ router.get("/filter", async (req, res) => {
 ===================================================== */
 router.get("/next-number", async (req, res) => {
   try {
-    if (!requireStore(req, res)) return;
-    const store = await getStoreById(req.storeId);
-    if (!store) return res.status(404).json({ message: "Store not found" });
-    // Preview only — the REAL number is allocated atomically when the job is saved.
-    res.json({ next: await peekNextJobNo(store), storeId: store._id, storeName: store.name });
+    const allJobs = await JobSheet.find().select("jobSheetNo");
+    if (!allJobs.length) return res.json({ next: "JS-001" });
+    const numbers = allJobs.map(job => {
+      const num = parseInt(String(job.jobSheetNo).replace(/\D/g, ""));
+      return isNaN(num) ? 0 : num;
+    });
+    return res.json({ next: `JS-${String(Math.max(...numbers) + 1).padStart(3, "0")}` });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -271,41 +240,32 @@ router.post("/", upload.single("idProofImage"), async (req, res) => {
         spare: 0,
         income: initIncome,
         others: 0,
-          }];
+      }];
     }
 
-    // ✅ MULTI-STORE — the job always lands in the caller's store, and its number is
-    // allocated HERE (atomic per-store counter). Any jobSheetNo sent by the browser is ignored.
-    if (!requireStore(req, res)) return;
-    const store = await getStoreById(req.storeId);
-    if (!store) return res.status(404).json({ message: "Store not found" });
-
-    const parsedDevice = JSON.parse(device || "{}");
-    const newJob = await saveWithNewNumber(store, (allocatedNo) => {
-      const doc = new JobSheet({
-        jobSheetNo: allocatedNo,
-        storeId:    store._id,
-        customer:          JSON.parse(customer || "{}"),
-        device:            parsedDevice,
-        physicalCondition: JSON.parse(physicalCondition || "[]"),
-        accessories:       JSON.parse(accessories || "[]"),
-        visualIssues:      JSON.parse(visualIssues || "[]"),
-        service:           parsedService,
-        spareItems:        JSON.parse(spareItems || "[]"),
-        rawSpareItems:     JSON.parse(rawSpareItems || "[]"),
-        idProofType,
-        engineerStatus: ({ Received: "Received", Pending: "Repairing", Repaired: "Ready" })[parsedDevice.mobileStatus] || "Received",
-        // from the verified login, not from the browser
-        createdBy:         { username: req.user.username, role: req.user.role },
-      });
-      if (req.file) {
-        doc.idProofImage = {
-          url: req.file.path || req.file.location,
-          public_id: req.file.filename || req.file.public_id,
-        };
-      }
-      return doc;
+    const newJob = new JobSheet({
+      jobSheetNo,
+      customer:          JSON.parse(customer || "{}"),
+      device:            JSON.parse(device || "{}"),
+      physicalCondition: JSON.parse(physicalCondition || "[]"),
+      accessories:       JSON.parse(accessories || "[]"),
+      visualIssues:      JSON.parse(visualIssues || "[]"),
+      service:           parsedService,
+      spareItems:        JSON.parse(spareItems || "[]"),
+      rawSpareItems:      JSON.parse(rawSpareItems || "[]"),   // ✅ FIX — now actually saved
+          idProofType,
+      engineerStatus: ({ Received: "Received", Pending: "Repairing", Repaired: "Ready" })[JSON.parse(device || "{}").mobileStatus] || "Received",
+      createdBy:         JSON.parse(createdBy || "{}"),
     });
+
+    if (req.file) {
+      newJob.idProofImage = {
+        url: req.file.path || req.file.location,
+        public_id: req.file.filename || req.file.public_id,
+      };
+    }
+
+    await newJob.save();
 
     // ✅ WhatsApp status message on initial save (e.g. Device Status = "Received").
     // Fire-and-forget: doesn't block the response, doesn't fail the save if WhatsApp errors.
@@ -535,20 +495,13 @@ router.put("/:id/rebill", async (req, res) => {
    receives, matching the flat shape the destructuring implies, and now also
    saves rawSpareItems if sent.
 ===================================================== */
-router.post('/manual-insert', authorize("admin", "storeManager"), async (req, res) => {
+router.post('/manual-insert', async (req, res) => {
   try {
-    if (!requireStore(req, res)) return;
-    const store = await getStoreById(req.storeId);
-    if (!store) return res.status(404).json({ message: "Store not found" });
     const {
       jobSheetNo, customerName, contact, make, model,
       issue, engineer, serviceRep, serviceCharge,
       repairDate, deliveryDate, rawSpareItems
     } = req.body;
-
-    if (!String(jobSheetNo || "").toUpperCase().startsWith(`${store.jobPrefix}-`)) {
-      return res.status(400).json({ message: `Job sheet number must start with ${store.jobPrefix}-` });
-    }
 
     // Already exists check
     const existing = await JobSheet.findOne({ jobSheetNo });
@@ -556,10 +509,8 @@ router.post('/manual-insert', authorize("admin", "storeManager"), async (req, re
       return res.status(400).json({ message: `${jobSheetNo} already exists` });
     }
 
-
     const newJob = new JobSheet({
       jobSheetNo,
-      storeId: store._id,
       customer: { name: customerName, contact },
       device:   { make, model },
       visualIssues: issue ? [issue] : [],
@@ -660,10 +611,10 @@ router.post("/send-invoice/:id", async (req, res) => {
 router.get("/salesrep-report", async (req, res) => {
   try {
     const { salesRep, fromDate, toDate } = req.query;
-    const query = { ...scope(req) }; // ✅ multi-store
+    const query = {};
 
     if (salesRep) {
-      query["service.serviceRep"] = { $regex: escapeRegex(salesRep.trim()), $options: "i" };
+      query["service.serviceRep"] = { $regex: salesRep.trim(), $options: "i" };
     }
 
     if (fromDate || toDate) {
@@ -765,14 +716,13 @@ router.get("/customers/search", async (req, res) => {
     const { q, type } = req.query;
     if (!q || q.trim().length < 1) return res.json([]);
 
-    const searchRegex = new RegExp("^" + escapeRegex(q.trim()), "i");
+    const searchRegex = new RegExp("^" + q.trim(), "i");
 
-    // ✅ multi-store: suggestions come from the caller's own store only
     let matchQuery = {};
     if (type === "contact") {
-      matchQuery = { ...scope(req), "customer.contact": searchRegex };
+      matchQuery = { "customer.contact": searchRegex };
     } else {
-      matchQuery = { ...scope(req), "customer.name": searchRegex };
+      matchQuery = { "customer.name": searchRegex };
     }
 
     const customers = await JobSheet.aggregate([
