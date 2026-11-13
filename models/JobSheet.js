@@ -76,8 +76,13 @@ const RebillHistorySchema = new mongoose.Schema({
   rebillPending: { type: Boolean, default: false }
 });
 
+
 const JobSheetSchema = new mongoose.Schema({
   jobSheetNo: { type: String, unique: true },
+
+  // ✅ MULTI-STORE — which store this job belongs to. Set server-side on create
+  // (from the logged-in user / selected store), never trusted from the browser.
+  storeId: { type: mongoose.Schema.Types.ObjectId, ref: "Store", index: true },
 
   customer: {
     name: String, contact: String, altContact: String,
@@ -163,5 +168,8 @@ cancelledAt:   { type: Date },
 rebillPending: { type: Boolean, default: false },  // ✅ இதை add பண்ணு
 
 }, { timestamps: true });
+
+// ✅ Most list/report queries are "this store, newest first / date range"
+JobSheetSchema.index({ storeId: 1, createdAt: -1 });
 
 module.exports = mongoose.model("JobSheet", JobSheetSchema);
