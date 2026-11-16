@@ -68,7 +68,9 @@ app.post("/api/login", async (req, res) => {
         userId: user._id,
         name: user.name,
         username: user.username,
-        role: user.role
+        role: user.role,
+        feedbackAccess: user.feedbackAccess || "none",   // ✅ NEW
+        linkedRep: user.linkedRep || "" 
       }
     });
   } catch (err) {
@@ -85,6 +87,8 @@ app.use("/api/drawers",    require("./routes/drawerRoutes"));
 app.use("/api/engineers",  require("./routes/engineerRoutes"));
 app.use("/api/salesreps",  require("./routes/salesRepRoutes")); // ✅ ONE TIME ONLY
 app.use("/api/users",      require("./routes/userRoutes"));
+app.use("/api/feedback",   require("./routes/feedbackRoutes"));
+app.use("/api/cases",      require("./routes/caseRoutes"));
 app.use("/api/dashboard",  require("./routes/dashboardRoutes"));
 app.use("/api/makes",      makeRoutes);
 app.use("/api/physical-conditions", require("./routes/physicalConditionRoutes"));

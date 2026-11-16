@@ -2,10 +2,6 @@ const generatePDF = require("../utils/generatePDF");
 const sendEmail = require("../utils/sendEmail");
 const JobSheet = require("../models/JobSheet");
 const { sendJobStatusWhatsApp } = require("../utils/sendWhatsApp"); // ✅ WhatsApp
-
-
-
-
 /* ================= GET ALL ================= */
 exports.getJobSheets = async (req, res) => {
 
@@ -24,8 +20,6 @@ exports.getJobSheets = async (req, res) => {
   }
 
 };
-
-
 /* ================= GET SINGLE ================= */
 exports.getJobSheetById = async (req, res) => {
 
@@ -50,8 +44,6 @@ exports.getJobSheetById = async (req, res) => {
   }
 
 };
-
-
 /* ================= UPDATE ================= */
 exports.updateJobSheet = async (req, res) => {
   try {
