@@ -90,6 +90,7 @@ app.use("/api/users",      require("./routes/userRoutes"));
 app.use("/api/feedback",   require("./routes/feedbackRoutes"));
 app.use("/api/cases",      require("./routes/caseRoutes"));
 app.use("/api/dashboard",  require("./routes/dashboardRoutes"));
+app.use("/api/analytics",  require("./routes/analyticsRoutes"));   // ✅ NEW
 app.use("/api/makes",      makeRoutes);
 app.use("/api/physical-conditions", require("./routes/physicalConditionRoutes"));
 app.use("/api/accessories",         require("./routes/accessoryRoutes"));

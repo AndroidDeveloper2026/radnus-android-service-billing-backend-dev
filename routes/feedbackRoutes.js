@@ -29,6 +29,19 @@ const actorOf = (req) => ({
   username: req.dbUser?.username || "admin",
 });
 
+// ✅ NEW — "Done" tab filter (shared by /queue count and /done list)
+const doneFilter = (req) => {
+  const base = { state: { $in: ["done", "internal", "skipped", "unreachable"] } };
+  if (req.user.role === "admin") return base;
+  const me = actorOf(req);
+  return {
+    $and: [
+      base,
+      { $or: [{ "collectedBy.userId": me.userId }, { "callAttempts.by": me.name }] },
+    ],
+  };
+};
+
 const baseFields = (job, scenario) => ({
   jobSheet: job._id,
   jobSheetNo: job.jobSheetNo,
@@ -140,6 +153,8 @@ router.get("/queue", async (req, res) => {
       });
       groups[key].oldestDays = Math.max(groups[key].oldestDays, daysOld);
     }
+
+    counts.done = await Feedback.countDocuments(doneFilter(req));   // ✅ NEW — Done tab count
 
     res.json({
       tab, counts,
@@ -582,17 +597,7 @@ router.get("/summary", adminOnly, async (req, res) => {
 /* ============ DONE / INTERNAL / SKIPPED / UNREACHABLE ============ */
 router.get("/done", async (req, res) => {
   try {
-    const base = { state: { $in: ["done", "internal", "skipped", "unreachable"] } };
-    let filter = base;
-    if (req.user.role !== "admin") {
-      const me = actorOf(req);
-      filter = {
-        $and: [
-          base,
-          { $or: [{ "collectedBy.userId": me.userId }, { "callAttempts.by": me.name }] },
-        ],
-      };
-    }
+    const filter = doneFilter(req);
     const list = await Feedback.find(filter)
       .sort({ updatedAt: -1 }).limit(150)
       .select("jobSheetNo customerName scenario rating flags state skipReason collectedBy updatedAt callAttempts").lean();
