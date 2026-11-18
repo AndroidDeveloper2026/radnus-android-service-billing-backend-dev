@@ -4,9 +4,17 @@ const { tools, runTool } = require("../services/aiTools");
 
 const router = express.Router();
 
-// Model names change over time. Set GEMINI_MODEL in .env to override this default.
-const MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+// Model names change over time. Set GEMINI_MODEL in .env to override the primary model.
+// If the primary model is busy/overloaded, we automatically fall back to the next ones.
+const PRIMARY_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+const FALLBACK_MODELS = (process.env.GEMINI_FALLBACK_MODELS ||
+  "gemini-3.7-flash,gemini-3.5-flash,gemini-3.5-flash-lite")
+  .split(",")
+  .map((m) => m.trim())
+  .filter(Boolean);
+const MODELS = [PRIMARY_MODEL, ...FALLBACK_MODELS.filter((m) => m !== PRIMARY_MODEL)];
+const geminiUrl = (model) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
 // Admin only for now
 const ALLOWED_ROLES = ["admin"];
@@ -39,31 +47,63 @@ function auth(req, res, next) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function callGemini(body) {
-  const MAX_TRIES = 4;
+  const TRIES_PER_MODEL = 2;
+  const TIMEOUT_MS = 20000; // if a model doesn't answer in 20s, give up on it
   let lastErr;
 
-  for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
-    const r = await fetch(GEMINI_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": process.env.GEMINI_API_KEY,
-      },
-      body: JSON.stringify(body),
-    });
-    const data = await r.json();
+  for (const model of MODELS) {
+    for (let attempt = 1; attempt <= TRIES_PER_MODEL; attempt++) {
+      console.log(`Calling Gemini model ${model} (attempt ${attempt})...`);
+      let r, data;
+      try {
+        r = await fetch(geminiUrl(model), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": process.env.GEMINI_API_KEY,
+          },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+        });
+        data = await r.json();
+      } catch (netErr) {
+        lastErr = netErr;
+        lastErr.status = 503;
+        if (netErr.name === "TimeoutError" || netErr.name === "AbortError") {
+          // model is hanging -> don't wait again, go to next model
+          console.log(`Gemini ${model} timed out after ${TIMEOUT_MS / 1000}s, trying next model...`);
+          break;
+        }
+        console.log(`Gemini network error on ${model}: ${netErr.message} (attempt ${attempt}/${TRIES_PER_MODEL})`);
+        await sleep(1000 * attempt);
+        continue;
+      }
 
-    if (r.ok) return data;
-    lastErr = new Error(data?.error?.message || `Gemini HTTP ${r.status}`);
-    lastErr.status = r.status;
+      if (r.ok) {
+        if (model !== PRIMARY_MODEL) console.log(`Answered using fallback model: ${model}`);
+        return data;
+      }
 
-    // Retry only on 500/503 (temporary overload).
-    // 429 means the quota is used up, and retrying would only waste more of it.
-    const retryable = [500, 503].includes(r.status);
-    if (!retryable || attempt === MAX_TRIES) break;
+      lastErr = new Error(data?.error?.message || `Gemini HTTP ${r.status}`);
+      lastErr.status = r.status;
 
-    console.log(`Gemini busy (HTTP ${r.status}), retry ${attempt}/${MAX_TRIES - 1}...`);
-    await sleep(1500 * attempt); // 1.5s, 3s, 4.5s
+      // 500/503 = temporary overload -> short retry on same model, then next model
+      if ([500, 503].includes(r.status)) {
+        console.log(`Gemini ${model} busy (HTTP ${r.status}), attempt ${attempt}/${TRIES_PER_MODEL}...`);
+        if (attempt < TRIES_PER_MODEL) await sleep(1000 * attempt + Math.random() * 500);
+        continue;
+      }
+
+      // 429 = this model's quota is used up, 404 = model not available for this key.
+      // Retrying the same model is useless, so jump straight to the next model.
+      if ([429, 404].includes(r.status)) {
+        console.log(`Gemini ${model} unavailable (HTTP ${r.status}), trying next model...`);
+        break;
+      }
+
+      // 400 / 401 / 403 etc = our own request or key problem. Fallback won't help.
+      throw lastErr;
+    }
   }
 
   throw lastErr;
@@ -144,6 +184,11 @@ Reply short and simple, in the same language as the question (English, Tamil or 
     if (err.status === 429) {
       return res.status(429).json({
         error: "Today's free AI limit has been reached. Please try again tomorrow.",
+      });
+    }
+    if (err.status === 503 || err.status === 500) {
+      return res.status(503).json({
+        error: "AI is very busy right now. Please try again in a minute.",
       });
     }
     res.status(500).json({ error: "AI service error" });
