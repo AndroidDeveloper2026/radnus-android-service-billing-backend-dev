@@ -2,6 +2,7 @@ const express = require("express");
 const router  = express.Router();
 
 const JobSheet = require("../models/JobSheet");
+const Feedback = require("../models/Feedback");
 const upload   = require("../middleware/upload");
 
 const generateInvoicePDF = require("../utils/generateInvoicePDF");
@@ -173,7 +174,23 @@ router.get("/filter", async (req, res) => {
       }
     }
 
-    const data = await JobSheet.find(query).sort({ createdAt: -1 });
+       const data = await JobSheet.find(query).sort({ createdAt: -1 });
+
+    // Opt-in (?withFeedback=1), All Report ku mattum overall feedback rating
+    if (req.query.withFeedback === "1") {
+      const fbs = await Feedback.find({
+        jobSheet: { $in: data.map((j) => j._id) },
+        state: "done",
+        rating: { $gt: 0 },
+      }).select("jobSheet rating").sort({ collectedAt: 1 }).lean();
+
+      // oldest → latest sort, so latest rating Map la overwrite aagum
+      const ratingOf = new Map(fbs.map((f) => [String(f.jobSheet), f.rating]));
+      return res.json(
+        data.map((j) => ({ ...j.toObject(), feedbackRating: ratingOf.get(String(j._id)) ?? null }))
+      );
+    }
+
     res.json(data);
   } catch (err) {
     console.error("FILTER ERROR:", err);
@@ -631,13 +648,26 @@ router.get("/salesrep-report", async (req, res) => {
       }
     }
 
-    const jobs = await JobSheet.find(query).sort({ createdAt: -1 });
+        const jobs = await JobSheet.find(query).sort({ createdAt: -1 });
+
+    // Opt-in (?withFeedback=1), overall feedback rating
+    let ratingOf = null;
+    if (req.query.withFeedback === "1") {
+      const fbs = await Feedback.find({
+        jobSheet: { $in: jobs.map((j) => j._id) },
+        state: "done",
+        rating: { $gt: 0 },
+      }).select("jobSheet rating").sort({ collectedAt: 1 }).lean();
+      ratingOf = new Map(fbs.map((f) => [String(f.jobSheet), f.rating]));   // latest rating wins
+    }
 
     const grouped = {};
     for (const job of jobs) {
       const rep = job.service?.serviceRep?.trim() || "Unassigned";
       if (!grouped[rep]) grouped[rep] = [];
-      grouped[rep].push(job);
+      grouped[rep].push(
+        ratingOf ? { ...job.toObject(), feedbackRating: ratingOf.get(String(job._id)) ?? null } : job
+      );
     }
 
     res.json(grouped);
